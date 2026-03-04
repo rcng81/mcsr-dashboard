@@ -112,7 +112,7 @@ function getRankFromElo(elo: number | null | undefined): RankMeta {
 }
 
 export default function App() {
-  const [username, setUsername] = useState("oSharkie");
+  const [username, setUsername] = useState("");
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [splits, setSplits] = useState<SplitAveragesResponse | null>(null);
   const [syncInfo, setSyncInfo] = useState<SyncDashboardResponse | null>(null);
@@ -227,7 +227,7 @@ export default function App() {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-slate-100 outline-none ring-cyan/30 focus:ring"
-              placeholder="Enter username"
+              placeholder="Enter MCSR username (e.g. Feinberg)"
             />
             <button
               onClick={() => loadDashboard()}
