@@ -104,6 +104,25 @@ async def unhandled_exception_handler(_: Request, __: Exception):
 Base.metadata.create_all(bind=engine)
 
 with engine.begin() as conn:
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS match_splits (
+            id SERIAL PRIMARY KEY,
+            match_id INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+            player_uuid VARCHAR NOT NULL,
+            nether_enter_ms DOUBLE PRECISION,
+            bastion_ms DOUBLE PRECISION,
+            fortress_ms DOUBLE PRECISION,
+            first_rod_ms DOUBLE PRECISION,
+            blind_ms DOUBLE PRECISION,
+            stronghold_ms DOUBLE PRECISION,
+            end_enter_ms DOUBLE PRECISION,
+            dragon_death_ms DOUBLE PRECISION,
+            finish_ms DOUBLE PRECISION
+        )
+    """))
+    conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_match_splits_match_player ON match_splits (match_id, player_uuid)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_match_splits_player_uuid ON match_splits (player_uuid)"))
+
     conn.execute(text("ALTER TABLE matches ADD COLUMN IF NOT EXISTS death_count INTEGER NOT NULL DEFAULT 0"))
     conn.execute(text("ALTER TABLE matches ADD COLUMN IF NOT EXISTS is_draw BOOLEAN NOT NULL DEFAULT FALSE"))
     conn.execute(text("ALTER TABLE matches ADD COLUMN IF NOT EXISTS match_type INTEGER"))
