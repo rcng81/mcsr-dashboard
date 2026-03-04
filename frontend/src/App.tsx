@@ -220,14 +220,14 @@ export default function App() {
         <aside className="border-b border-slate-800 bg-slate-950/70 p-6 backdrop-blur lg:border-b-0 lg:border-r">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan">MCSR Dashboard</p>
           <h1 className="mt-2 text-2xl font-bold">Player Lookup</h1>
-          <p className="mt-2 text-sm text-slate-400">Type a username and sync ranked data.</p>
+          <p className="mt-2 text-sm text-slate-400">Search username only.</p>
 
           <div className="mt-6 space-y-3">
             <input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-slate-100 outline-none ring-cyan/30 focus:ring"
-              placeholder="Enter MCSR username (e.g. Feinberg)"
+              placeholder="Search username"
             />
             <button
               onClick={() => loadDashboard()}
