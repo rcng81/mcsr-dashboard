@@ -2,6 +2,8 @@ import httpx
 from app.services.cache import cache_get_json, cache_set_json, make_cache_key
 
 BASE_URL = "https://mcsrranked.com/api"
+HTTP_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
+MAX_RETRIES = 2
 
 
 async def _get_json_with_cache(url: str, ttl_seconds: int):
@@ -10,8 +12,18 @@ async def _get_json_with_cache(url: str, ttl_seconds: int):
     if cached is not None:
         return cached
 
-    async with httpx.AsyncClient() as client:
-        response = await client.get(url)
+    response = None
+    for _ in range(MAX_RETRIES + 1):
+        try:
+            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+                response = await client.get(url)
+            break
+        except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.TimeoutException, httpx.RequestError):
+            response = None
+            continue
+
+    if response is None:
+        return None
 
     if response.status_code != 200:
         return None
