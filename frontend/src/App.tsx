@@ -189,11 +189,12 @@ export default function App() {
 
   useEffect(() => {
     if (!activeUsername) return;
+    const currentUsername = activeUsername;
     let cancelled = false;
 
     async function reloadFilteredSplits() {
       try {
-        const next = await getSplitAverages(activeUsername, {
+        const next = await getSplitAverages(currentUsername, {
           start: splitStartFilter,
           bastion: splitBastionFilter
         });
