@@ -1,13 +1,18 @@
+import asyncio
+import json
+import math
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 from app.db.dependency import get_db
+from app.db.session import SessionLocal
 from app.models.player import Player
 from app.services.mcsr_service import (
     fetch_player_from_api,
     fetch_user_matches_from_api,
     fetch_match_info_from_api
 )
+from app.services.cache import get_redis_client
 from app.services.splits import extract_splits, extract_death_counts
 from app.models.match import Match
 from datetime import datetime, timedelta
@@ -43,6 +48,52 @@ def _normalize_seed_value(value: str | None) -> str | None:
         return None
     normalized = value.strip().lower()
     return normalized or None
+
+
+async def _set_sync_progress(uuid: str, processed: int, total: int, message: str):
+    progress_key = f"sync:progress:{uuid.lower()}"
+    percent = 100.0 if total <= 0 else round(min((processed / total) * 100, 100), 2)
+    payload = {
+        "processed": processed,
+        "total": total,
+        "progress_percent": percent,
+        "message": message
+    }
+    try:
+        redis = get_redis_client()
+        await redis.set(progress_key, json.dumps(payload), ex=900)
+    except Exception:
+        pass
+
+
+async def _run_sync_job(username: str, scope: str, max_pages: int, lock_key: str):
+    db = SessionLocal()
+    try:
+        await sync_matches(username=username, scope=scope, max_pages=max_pages, db=db)
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+        try:
+            redis = get_redis_client()
+            await redis.delete(lock_key)
+        except Exception:
+            pass
+
+
+async def _schedule_sync_if_needed(lock_id: str, username: str, scope: str, max_pages: int) -> bool:
+    lock_key = f"sync:lock:{lock_id.lower()}"
+    try:
+        redis = get_redis_client()
+        locked = await redis.set(lock_key, "1", ex=300, nx=True)
+    except Exception:
+        locked = True
+
+    if not locked:
+        return False
+
+    asyncio.create_task(_run_sync_job(username, scope, max_pages, lock_key))
+    return True
 
 @router.get("/{username}")
 async def get_player(
@@ -142,9 +193,13 @@ async def sync_matches(
 
     inserted_matches = 0
     inserted_splits = 0
+    total_to_process = len(match_data)
+    processed = 0
+    await _set_sync_progress(uuid, 0, total_to_process, "Preparing sync...")
 
     for match in match_data:
         if match.get("type") != 2:
+            processed += 1
             continue
 
         existing_match = db.query(Match).filter(
@@ -242,7 +297,17 @@ async def sync_matches(
             })
             inserted_splits += result.rowcount or 0
 
+        processed += 1
+        if processed % 5 == 0 or processed == total_to_process:
+            await _set_sync_progress(
+                uuid,
+                processed,
+                total_to_process,
+                f"Syncing match data... ({processed}/{total_to_process})"
+            )
+
     db.commit()
+    await _set_sync_progress(uuid, total_to_process, total_to_process, "Sync complete.")
 
     return {
         "inserted_matches": inserted_matches,
@@ -255,6 +320,7 @@ async def sync_matches(
 @router.post("/{username}/sync-dashboard")
 async def sync_dashboard(
     username: str = Path(..., min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$"),
+    fast_mode: bool = Query(True),
     db: Session = Depends(get_db)
 ):
     """
@@ -300,23 +366,6 @@ async def sync_dashboard(
         Match.player_id == player.id,
         Match.match_type == 2
     ).scalar() or 0
-    db_split_count = db.execute(text("""
-        SELECT COUNT(*)
-        FROM match_splits ms
-        JOIN matches m ON m.id = ms.match_id
-        WHERE m.player_id = :player_id
-          AND m.match_type = 2
-    """), {"player_id": player.id}).scalar() or 0
-    db_seed_info_count = db.query(func.count(Match.id)).filter(
-        Match.player_id == player.id,
-        Match.match_type == 2,
-        Match.start_overworld != None
-    ).scalar() or 0
-    db_bastion_info_count = db.query(func.count(Match.id)).filter(
-        Match.player_id == player.id,
-        Match.match_type == 2,
-        Match.bastion_type != None
-    ).scalar() or 0
     api_ranked_total = (
         api_data.get("statistics", {})
         .get("total", {})
@@ -325,60 +374,122 @@ async def sync_dashboard(
     )
 
     first_time = latest_db_match is None
-    # If local ranked count is materially lower than API total, backfill all-time.
-    history_incomplete = api_ranked_total > (db_ranked_count + 20)
-    dashboard_data_missing = (
-        (db_ranked_count == 0 and api_ranked_total > 0)
-        or (db_split_count == 0 and db_ranked_count > 0)
-        or (db_seed_info_count == 0 and db_ranked_count > 0)
-        or (db_bastion_info_count == 0 and db_ranked_count > 0)
-    )
-    needs_sync = first_time or (latest_api_match_id is not None and latest_api_match_id != latest_db_match_id)
+    missing_ranked_count = max((api_ranked_total or 0) - (db_ranked_count or 0), 0)
+    latest_mismatch = latest_api_match_id is not None and latest_api_match_id != latest_db_match_id
+    needs_sync = first_time or missing_ranked_count > 0 or latest_mismatch
 
-    if history_incomplete or dashboard_data_missing:
-        max_pages = max(50, min(500, int(api_ranked_total / 100) + 2))
-        result = await sync_matches(username, scope="all_time", max_pages=max_pages, db=db)
-        return {
-            "created_player": created_player,
-            "first_time": first_time,
-            "up_to_date": False,
-            "message": "Detected missing/incomplete ranked history. Running all-time backfill.",
-            "sync": result
-        }
+    if first_time:
+        sync_scope = "all_time"
+        sync_pages = max(50, min(500, math.ceil((api_ranked_total or 0) / 100) + 2))
+    elif missing_ranked_count > 0:
+        # Fetch only enough newest pages to cover the known difference.
+        sync_scope = "all_time"
+        sync_pages = max(2, min(500, math.ceil(missing_ranked_count / 100) + 2))
+    else:
+        # Fallback when totals match but latest id differs (edge-case mismatch).
+        sync_scope = "all_time"
+        sync_pages = 2
 
     if not needs_sync:
         return {
             "created_player": created_player,
             "first_time": False,
             "up_to_date": True,
-            "message": "No new ranked matches to sync."
+            "sync_started": False,
+            "message": "Ranked totals match API. Returning cached data."
         }
 
-    if first_time:
-        ranked_total = (
+    if fast_mode:
+        started = await _schedule_sync_if_needed(uuid, username, sync_scope, sync_pages)
+        return {
+            "created_player": created_player,
+            "first_time": first_time,
+            "up_to_date": False,
+            "sync_started": started,
+            "message": (
+                "Sync already in progress. Showing cached data."
+                if not started else
+                (
+                    "First-time player detected. Building full ranked history in background."
+                    if first_time else
+                    f"Detected {missing_ranked_count} new ranked matches. Syncing latest data in background."
+                )
+            )
+        }
+
+    result = await sync_matches(username, scope=sync_scope, max_pages=sync_pages, db=db)
+    return {
+        "created_player": created_player,
+        "first_time": first_time,
+        "up_to_date": False,
+        "sync_started": False,
+        "message": (
+            "First-time player detected. Synced all-time ranked history."
+            if first_time else
+            f"Synced {missing_ranked_count} new ranked matches."
+        ),
+        "sync": result
+    }
+
+
+@router.get("/{username}/sync-status")
+async def get_sync_status(
+    username: str = Path(..., min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$"),
+    db: Session = Depends(get_db)
+):
+    player = db.query(Player).filter(Player.username.ilike(username)).first()
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    lock_key = f"sync:lock:{player.uuid.lower()}"
+    progress_key = f"sync:progress:{player.uuid.lower()}"
+    in_progress = False
+    progress_percent = 0.0
+    progress_message = "Sync idle."
+    ranked_synced = 0
+    ranked_total = 0
+
+    try:
+        redis = get_redis_client()
+        in_progress = await redis.exists(lock_key) == 1
+        raw = await redis.get(progress_key)
+        if raw:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                progress_percent = float(parsed.get("progress_percent", 0.0) or 0.0)
+                ranked_synced = int(parsed.get("processed", 0) or 0)
+                ranked_total = int(parsed.get("total", 0) or 0)
+                progress_message = str(parsed.get("message", progress_message))
+    except Exception:
+        pass
+
+    if ranked_total == 0:
+        db_ranked_count = db.query(func.count(Match.id)).filter(
+            Match.player_id == player.id,
+            Match.match_type == 2
+        ).scalar() or 0
+
+        api_data = await fetch_player_from_api(username)
+        api_ranked_total = (
             api_data.get("statistics", {})
             .get("total", {})
             .get("playedMatches", {})
             .get("ranked") or 0
-        )
-        # At least 50 pages for reliable initial load, capped by endpoint validation.
-        max_pages = max(50, min(500, int(ranked_total / 100) + 2))
-        result = await sync_matches(username, scope="all_time", max_pages=max_pages, db=db)
-        return {
-            "created_player": created_player,
-            "first_time": True,
-            "up_to_date": False,
-            "message": "First-time player detected. Loaded all-time ranked history.",
-            "sync": result
-        }
+        ) if api_data else 0
 
-    result = await sync_matches(username, scope="last_30_days", max_pages=50, db=db)
+        ranked_synced = db_ranked_count
+        ranked_total = api_ranked_total
+        total = max(api_ranked_total, db_ranked_count, 1)
+        progress_percent = round(min((db_ranked_count / total) * 100, 100), 2)
+        progress_message = "Sync in progress. Building ranked history..." if in_progress else "Sync idle."
+
     return {
-        "created_player": created_player,
-        "first_time": False,
-        "up_to_date": False,
-        "message": "New ranked matches found. Synced latest data.",
-        "sync": result
+        "username": player.username,
+        "in_progress": in_progress,
+        "ranked_synced": ranked_synced,
+        "ranked_total": ranked_total,
+        "progress_percent": progress_percent,
+        "message": progress_message
     }
 
 @router.get("/{username}/stats")
