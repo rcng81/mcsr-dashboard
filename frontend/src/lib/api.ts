@@ -1,4 +1,10 @@
-import type { SplitAveragesResponse, StatsResponse, SyncDashboardResponse, SyncResponse } from "./types";
+import type {
+  SplitAveragesResponse,
+  StatsResponse,
+  SyncDashboardResponse,
+  SyncResponse,
+  SyncStatusResponse
+} from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 
@@ -47,6 +53,10 @@ export function syncDashboard(username: string) {
   return request<SyncDashboardResponse>(`/players/${encodeURIComponent(username)}/sync-dashboard`, {
     method: "POST"
   });
+}
+
+export function getSyncStatus(username: string) {
+  return request<SyncStatusResponse>(`/players/${encodeURIComponent(username)}/sync-status`);
 }
 
 export function getStats(username: string) {

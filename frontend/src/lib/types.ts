@@ -76,6 +76,16 @@ export interface SyncDashboardResponse {
   created_player: boolean;
   first_time: boolean;
   up_to_date: boolean;
+  sync_started?: boolean;
   message: string;
   sync?: SyncResponse;
+}
+
+export interface SyncStatusResponse {
+  username: string;
+  in_progress: boolean;
+  ranked_synced: number;
+  ranked_total: number;
+  progress_percent: number;
+  message: string;
 }

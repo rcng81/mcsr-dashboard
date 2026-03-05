@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { getSplitAverages, getStats, syncDashboard } from "./lib/api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { getSplitAverages, getStats, getSyncStatus, syncDashboard } from "./lib/api";
 import type { SplitAveragesResponse, StatsResponse, SyncDashboardResponse } from "./lib/types";
 import coalIcon from "./assets/coal.png";
 import ironIcon from "./assets/iron.png";
@@ -119,11 +119,13 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusText, setStatusText] = useState<string | null>(null);
+  const [syncProgress, setSyncProgress] = useState<number | null>(null);
   const [windowKey, setWindowKey] = useState<WindowKey>("7");
   const [splitWindowKey, setSplitWindowKey] = useState<SplitWindowKey>("all");
   const [splitStartFilter, setSplitStartFilter] = useState("all");
   const [splitBastionFilter, setSplitBastionFilter] = useState("all");
   const [activeUsername, setActiveUsername] = useState<string | null>(null);
+  const syncMonitorIdRef = useRef(0);
 
   const windowStats =
     windowKey === "7" ? stats?.synced_record_last_7_days ?? null : stats?.synced_record_last_30_days ?? null;
@@ -159,6 +161,12 @@ export default function App() {
     setStatusText("Checking player and syncing ranked data...");
     try {
       const clean = username.trim();
+      syncMonitorIdRef.current += 1;
+      const monitorId = syncMonitorIdRef.current;
+      const defaultStartFilter = "all";
+      const defaultBastionFilter = "all";
+      setSplitStartFilter(defaultStartFilter);
+      setSplitBastionFilter(defaultBastionFilter);
       const sync = await syncDashboard(clean);
       setSyncInfo(sync);
       if (sync.first_time) {
@@ -171,19 +179,74 @@ export default function App() {
       const [statsRes, splitsRes] = await Promise.all([
         getStats(clean),
         getSplitAverages(clean, {
-          start: splitStartFilter,
-          bastion: splitBastionFilter
+          start: defaultStartFilter,
+          bastion: defaultBastionFilter
         })
       ]);
       setStats(statsRes);
       setSplits(splitsRes);
       setActiveUsername(clean);
       setStatusText(sync.message);
+      if (sync.sync_started) {
+        setSyncProgress(0);
+        void monitorSyncProgress(clean, defaultStartFilter, defaultBastionFilter, monitorId);
+      } else {
+        setSyncProgress(null);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unknown error");
       setStatusText(null);
+      setSyncProgress(null);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function monitorSyncProgress(
+    usernameToTrack: string,
+    startFilter: string,
+    bastionFilter: string,
+    monitorId: number
+  ) {
+    const startedAt = Date.now();
+    let maxSeenProgress = 0;
+    for (let i = 0; i < 80; i += 1) {
+      if (monitorId !== syncMonitorIdRef.current) return;
+      try {
+        const status = await getSyncStatus(usernameToTrack);
+        maxSeenProgress = Math.max(maxSeenProgress, status.progress_percent || 0);
+        if (monitorId !== syncMonitorIdRef.current) return;
+        setSyncProgress(maxSeenProgress);
+        setStatusText(status.message);
+        if (!status.in_progress) break;
+      } catch {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+
+    try {
+      if (monitorId !== syncMonitorIdRef.current) return;
+      setSyncProgress((prev) => Math.max(prev ?? 0, 100));
+      const elapsed = Date.now() - startedAt;
+      const minVisibleMs = 1200;
+      if (elapsed < minVisibleMs) {
+        await new Promise((resolve) => setTimeout(resolve, minVisibleMs - elapsed));
+      }
+      const [nextStats, nextSplits] = await Promise.all([
+        getStats(usernameToTrack),
+        getSplitAverages(usernameToTrack, { start: startFilter, bastion: bastionFilter })
+      ]);
+      if (monitorId !== syncMonitorIdRef.current) return;
+      setStats(nextStats);
+      setSplits(nextSplits);
+      setStatusText("Sync complete. Dashboard updated.");
+    } catch {
+      // Keep prior data if refresh fails.
+    } finally {
+      if (monitorId === syncMonitorIdRef.current) {
+        setSyncProgress(null);
+      }
     }
   }
 
@@ -245,6 +308,20 @@ export default function App() {
             </p>
           ) : null}
           {statusText ? <p className="mt-2 text-xs text-cyan">{statusText}</p> : null}
+          {syncProgress != null ? (
+            <div className="mt-3">
+              <div className="mb-1 flex items-center justify-between text-[11px] text-slate-400">
+                <span>Sync Progress</span>
+                <span>{Math.round(syncProgress)}%</span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800">
+                <div
+                  className="h-full bg-cyan transition-all duration-500"
+                  style={{ width: `${Math.max(5, syncProgress)}%` }}
+                />
+              </div>
+            </div>
+          ) : null}
           {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
         </aside>
 
@@ -386,7 +463,7 @@ export default function App() {
                 <div className="space-y-2">
                   {(activeSplitWindow?.total_split_rows ?? 0) === 0 ? (
                     <div className="rounded-lg bg-slate-800/70 px-3 py-3 text-sm text-slate-300">
-                      No matches found for the selected start + bastion filters.
+                      No matches found for the selected seed type + bastion filters.
                     </div>
                   ) : (
                     splitRows.map((row) => (
@@ -409,7 +486,7 @@ export default function App() {
                 </div>
                 <div className="mt-5 space-y-4 border-t border-slate-800 pt-4">
                   <div>
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Filter by Start</p>
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Filter by Seed Type</p>
                     <div className="flex flex-wrap gap-2">
                       <button
                         onClick={() => setSplitStartFilter("all")}
