@@ -56,15 +56,25 @@ export default function LandingPage({ onStart }: LandingPageProps) {
                 <li>Average split timings with filterable seed and bastion type</li>
               </ul>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-2xl border border-slate-700/70 bg-slate-900/45 p-4 text-center backdrop-blur">
-                <p className="text-2xl font-bold text-cyan">Live</p>
-                <p className="mt-1 text-xs text-slate-400">Background Sync</p>
+            <div className="rounded-2xl border border-slate-700/70 bg-slate-900/45 p-5 backdrop-blur">
+              <p className="text-xs uppercase tracking-[0.12em] text-slate-400">Core Features</p>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="rounded-lg border border-slate-700/80 bg-slate-900/80 px-3 py-2 text-xs font-semibold text-cyan">
+                  Live Sync
+                </div>
+                <div className="rounded-lg border border-slate-700/80 bg-slate-900/80 px-3 py-2 text-xs font-semibold text-cyan">
+                  Cached Search
+                </div>
+                <div className="rounded-lg border border-slate-700/80 bg-slate-900/80 px-3 py-2 text-xs font-semibold text-cyan">
+                  Progress Tracking
+                </div>
+                <div className="rounded-lg border border-slate-700/80 bg-slate-900/80 px-3 py-2 text-xs font-semibold text-cyan">
+                  Split Filters
+                </div>
               </div>
-              <div className="rounded-2xl border border-slate-700/70 bg-slate-900/45 p-4 text-center backdrop-blur">
-                <p className="text-2xl font-bold text-cyan">Fast</p>
-                <p className="mt-1 text-xs text-slate-400">Cached First Search</p>
-              </div>
+              <p className="mt-3 text-xs text-slate-400">
+                Searches return quickly from cached data while fresh ranked matches sync in the background.
+              </p>
             </div>
           </div>
         </section>

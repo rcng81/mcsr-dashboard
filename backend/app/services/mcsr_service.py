@@ -69,3 +69,19 @@ async def fetch_match_info_from_api(match_id: int):
     if not json_data or json_data.get("status") != "success":
         return None
     return json_data
+
+
+async def fetch_leaderboard_from_api(season: int | None = None, country: str | None = None):
+    url = f"{BASE_URL}/leaderboard"
+    params = []
+    if season is not None:
+        params.append(f"season={season}")
+    if country:
+        params.append(f"country={country}")
+    if params:
+        url += "?" + "&".join(params)
+
+    json_data = await _get_json_with_cache(url, ttl_seconds=120)
+    if not json_data or json_data.get("status") != "success":
+        return []
+    return json_data.get("data", [])

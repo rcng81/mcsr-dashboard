@@ -10,7 +10,8 @@ from app.models.player import Player
 from app.services.mcsr_service import (
     fetch_player_from_api,
     fetch_user_matches_from_api,
-    fetch_match_info_from_api
+    fetch_match_info_from_api,
+    fetch_leaderboard_from_api
 )
 from app.services.cache import get_redis_client
 from app.services.splits import extract_splits, extract_death_counts
@@ -131,6 +132,77 @@ async def get_player(
     db.refresh(new_player)
 
     return new_player
+
+
+@router.get("/search/leaderboard")
+async def search_leaderboard_players(
+    q: str = Query(..., min_length=1, max_length=32, pattern=r"^[A-Za-z0-9_.-]+$"),
+    limit: int = Query(10, ge=1, le=20),
+    db: Session = Depends(get_db)
+):
+    leaderboard_raw = await fetch_leaderboard_from_api()
+    needle = q.strip().lower()
+
+    if not needle:
+        return {"query": q, "results": []}
+
+    if isinstance(leaderboard_raw, list):
+        leaderboard_rows = leaderboard_raw
+    elif isinstance(leaderboard_raw, dict):
+        # Handle API variants where rows are wrapped or keyed by id/rank.
+        for key in ("users", "players", "rows", "leaderboard", "items"):
+            maybe_list = leaderboard_raw.get(key)
+            if isinstance(maybe_list, list):
+                leaderboard_rows = maybe_list
+                break
+        else:
+            leaderboard_rows = list(leaderboard_raw.values())
+    else:
+        leaderboard_rows = []
+
+    matches = []
+    seen_uuids = set()
+    for row in leaderboard_rows:
+        if not isinstance(row, dict):
+            continue
+        profile = row.get("user") if isinstance(row.get("user"), dict) else None
+        if profile is None and isinstance(row.get("profile"), dict):
+            profile = row.get("profile")
+
+        nickname = str(
+            row.get("nickname")
+            or (profile.get("nickname") if profile else None)
+            or ""
+        ).strip()
+        if not nickname:
+            continue
+        if needle not in nickname.lower():
+            continue
+        row_uuid = row.get("uuid") or (profile.get("uuid") if profile else None)
+        if row_uuid in seen_uuids:
+            continue
+        matches.append({
+            "uuid": row_uuid,
+            "nickname": nickname,
+            "elo_rate": row.get("eloRate") or row.get("elo_rate"),
+            "elo_rank": row.get("eloRank") or row.get("elo_rank") or row.get("rank")
+        })
+        seen_uuids.add(row_uuid)
+        if len(matches) >= limit:
+            break
+
+    # Fallback: if user typed an exact username that was previously searched/synced,
+    # include it even when not on current leaderboard suggestions.
+    exact_db_player = db.query(Player).filter(func.lower(Player.username) == needle).first()
+    if exact_db_player and exact_db_player.uuid not in seen_uuids and len(matches) < limit:
+        matches.append({
+            "uuid": exact_db_player.uuid,
+            "nickname": exact_db_player.username,
+            "elo_rate": exact_db_player.current_elo,
+            "elo_rank": None
+        })
+
+    return {"query": q, "results": matches}
 
 @router.post("/{username}/sync-matches")
 async def sync_matches(

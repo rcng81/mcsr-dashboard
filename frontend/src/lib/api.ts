@@ -3,7 +3,8 @@ import type {
   StatsResponse,
   SyncDashboardResponse,
   SyncResponse,
-  SyncStatusResponse
+  SyncStatusResponse,
+  LeaderboardSearchResponse
 } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
@@ -61,6 +62,13 @@ export function getSyncStatus(username: string) {
 
 export function getStats(username: string) {
   return request<StatsResponse>(`/players/${encodeURIComponent(username)}/stats`);
+}
+
+export function searchLeaderboardPlayers(query: string, limit = 10) {
+  const params = new URLSearchParams();
+  params.set("q", query);
+  params.set("limit", String(limit));
+  return request<LeaderboardSearchResponse>(`/players/search/leaderboard?${params.toString()}`);
 }
 
 export function getSplitAverages(

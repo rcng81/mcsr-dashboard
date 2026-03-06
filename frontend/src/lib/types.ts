@@ -89,3 +89,15 @@ export interface SyncStatusResponse {
   progress_percent: number;
   message: string;
 }
+
+export interface LeaderboardPlayer {
+  uuid: string;
+  nickname: string;
+  elo_rate: number | null;
+  elo_rank: number | null;
+}
+
+export interface LeaderboardSearchResponse {
+  query: string;
+  results: LeaderboardPlayer[];
+}

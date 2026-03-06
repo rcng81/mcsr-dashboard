@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getSplitAverages, getStats, getSyncStatus, syncDashboard } from "../lib/api";
-import type { SplitAveragesResponse, StatsResponse, SyncDashboardResponse } from "../lib/types";
+import { getSplitAverages, getStats, getSyncStatus, searchLeaderboardPlayers, syncDashboard } from "../lib/api";
+import type { LeaderboardPlayer, SplitAveragesResponse, StatsResponse, SyncDashboardResponse } from "../lib/types";
 import coalIcon from "../assets/coal.png";
 import ironIcon from "../assets/iron.png";
 import goldIcon from "../assets/gold.png";
@@ -129,7 +129,10 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
   const [splitStartFilter, setSplitStartFilter] = useState("all");
   const [splitBastionFilter, setSplitBastionFilter] = useState("all");
   const [activeUsername, setActiveUsername] = useState<string | null>(null);
+  const [searchSuggestions, setSearchSuggestions] = useState<LeaderboardPlayer[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const syncMonitorIdRef = useRef(0);
+  const suggestionDebounceRef = useRef<number | null>(null);
 
   const windowStats =
     windowKey === "7" ? stats?.synced_record_last_7_days ?? null : stats?.synced_record_last_30_days ?? null;
@@ -281,6 +284,43 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
     };
   }, [activeUsername, splitStartFilter, splitBastionFilter]);
 
+  useEffect(() => {
+    const q = username.trim();
+    if (suggestionDebounceRef.current) {
+      window.clearTimeout(suggestionDebounceRef.current);
+      suggestionDebounceRef.current = null;
+    }
+
+    if (q.length < 1) {
+      setSearchSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
+    suggestionDebounceRef.current = window.setTimeout(async () => {
+      try {
+        const res = await searchLeaderboardPlayers(q, 10);
+        setSearchSuggestions(res.results);
+        setShowSuggestions(true);
+      } catch {
+        setSearchSuggestions([]);
+      }
+    }, 220);
+
+    return () => {
+      if (suggestionDebounceRef.current) {
+        window.clearTimeout(suggestionDebounceRef.current);
+        suggestionDebounceRef.current = null;
+      }
+    };
+  }, [username]);
+
+  function handleSuggestionSelect(player: LeaderboardPlayer) {
+    setUsername(player.nickname);
+    setShowSuggestions(false);
+    setSearchSuggestions([]);
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[340px_1fr]">
@@ -299,9 +339,42 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
             <input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
+              onFocus={() => {
+                if (searchSuggestions.length > 0) {
+                  setShowSuggestions(true);
+                }
+              }}
+              onBlur={() => {
+                window.setTimeout(() => setShowSuggestions(false), 120);
+              }}
               className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-slate-100 outline-none ring-cyan/30 focus:ring"
               placeholder="Search username"
             />
+            {showSuggestions && searchSuggestions.length > 0 ? (
+              <div className="max-h-72 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900/95">
+                {searchSuggestions.map((player) => (
+                  <button
+                    key={player.uuid}
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleSuggestionSelect(player)}
+                    className="grid w-full grid-cols-[auto_1fr_auto] items-center gap-3 border-b border-slate-800 px-3 py-2 text-left transition hover:bg-slate-800/70 last:border-b-0"
+                  >
+                    <img
+                      src={`https://mc-heads.net/avatar/${encodeURIComponent(player.nickname)}/24`}
+                      alt={player.nickname}
+                      className="h-6 w-6 rounded-sm [image-rendering:pixelated]"
+                      loading="lazy"
+                    />
+                    <div>
+                      <p className="text-sm font-semibold text-slate-100">{player.nickname}</p>
+                      <p className="text-xs text-slate-400">{player.elo_rate ?? "-"} ELO</p>
+                    </div>
+                    <p className="text-xs text-slate-500">#{player.elo_rank ?? "-"}</p>
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <button
               onClick={() => loadDashboard()}
               disabled={loading || !username.trim()}
