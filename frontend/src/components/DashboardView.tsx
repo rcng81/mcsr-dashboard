@@ -321,6 +321,11 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
     setSearchSuggestions([]);
   }
 
+  function handleSubmitSearch() {
+    if (loading || !username.trim()) return;
+    void loadDashboard();
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[340px_1fr]">
@@ -339,6 +344,12 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
             <input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleSubmitSearch();
+                }
+              }}
               onFocus={() => {
                 if (searchSuggestions.length > 0) {
                   setShowSuggestions(true);
@@ -376,7 +387,7 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
               </div>
             ) : null}
             <button
-              onClick={() => loadDashboard()}
+              onClick={handleSubmitSearch}
               disabled={loading || !username.trim()}
               className="w-full rounded-xl bg-ink px-4 py-2 font-semibold text-white disabled:opacity-50"
             >
