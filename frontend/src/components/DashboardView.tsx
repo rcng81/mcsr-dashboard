@@ -179,12 +179,12 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
     return Array.from(new Set([...DEFAULT_START_FILTERS, ...dynamic]));
   }, [splits]);
 
-  async function loadDashboard() {
+  async function loadDashboard(usernameOverride?: string) {
     setLoading(true);
     setError(null);
     setStatusText("Checking player and syncing ranked data...");
     try {
-      const clean = username.trim();
+      const clean = (usernameOverride ?? username).trim();
       syncMonitorIdRef.current += 1;
       const monitorId = syncMonitorIdRef.current;
       const defaultStartFilter = "all";
@@ -375,6 +375,7 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
     setSelectedSuggestion(player.nickname);
     setShowSuggestions(false);
     setSearchSuggestions([]);
+    void loadDashboard(player.nickname);
   }
 
   function handleSubmitSearch() {

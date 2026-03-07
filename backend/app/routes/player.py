@@ -59,6 +59,12 @@ def _match_outcome_for_player(winner_uuid: str | None, player_uuid: str) -> str:
     return "loss"
 
 
+def _normalize_uuid(value: str | None) -> str:
+    if not value:
+        return ""
+    return value.replace("-", "").lower().strip()
+
+
 async def _set_sync_progress(uuid: str, processed: int, total: int, message: str):
     progress_key = f"sync:progress:{uuid.lower()}"
     percent = 100.0 if total <= 0 else round(min((processed / total) * 100, 100), 2)
@@ -231,6 +237,7 @@ async def get_match_history(
     player_uuid = api_data.get("uuid")
     if not player_uuid:
         raise HTTPException(status_code=500, detail="UUID missing from API response")
+    player_uuid_norm = _normalize_uuid(player_uuid)
 
     recent_matches = []
     before_cursor = None
@@ -286,19 +293,31 @@ async def get_match_history(
 
         # 1v1 opponent profile for the current match.
         opponent = next(
-            (p for p in players if isinstance(p, dict) and p.get("uuid") and p.get("uuid") != player_uuid),
+            (
+                p for p in players
+                if isinstance(p, dict)
+                and p.get("uuid")
+                and _normalize_uuid(p.get("uuid")) != player_uuid_norm
+            ),
             None
         )
         opponent_uuid = opponent.get("uuid") if isinstance(opponent, dict) else None
         opponent_nickname = opponent.get("nickname") if isinstance(opponent, dict) else None
+        opponent_uuid_norm = _normalize_uuid(opponent_uuid)
 
         # Use change row for opponent/player elo snapshots when available.
         player_change_row = next(
-            (c for c in changes if isinstance(c, dict) and c.get("uuid") == player_uuid),
+            (
+                c for c in changes
+                if isinstance(c, dict) and _normalize_uuid(c.get("uuid")) == player_uuid_norm
+            ),
             None
         )
         opponent_change_row = next(
-            (c for c in changes if isinstance(c, dict) and c.get("uuid") == opponent_uuid),
+            (
+                c for c in changes
+                if isinstance(c, dict) and _normalize_uuid(c.get("uuid")) == opponent_uuid_norm
+            ),
             None
         )
 
