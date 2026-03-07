@@ -51,6 +51,14 @@ def _normalize_seed_value(value: str | None) -> str | None:
     return normalized or None
 
 
+def _match_outcome_for_player(winner_uuid: str | None, player_uuid: str) -> str:
+    if winner_uuid is None:
+        return "draw"
+    if winner_uuid == player_uuid:
+        return "win"
+    return "loss"
+
+
 async def _set_sync_progress(uuid: str, processed: int, total: int, message: str):
     progress_key = f"sync:progress:{uuid.lower()}"
     percent = 100.0 if total <= 0 else round(min((processed / total) * 100, 100), 2)
@@ -203,6 +211,131 @@ async def search_leaderboard_players(
         })
 
     return {"query": q, "results": matches}
+
+
+@router.get("/{username}/match-history")
+async def get_match_history(
+    username: str = Path(..., min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$"),
+    limit: int = Query(300, ge=1, le=2000),
+    window: str = Query("current_season", pattern="^(current_season|last_7_days|last_30_days)$"),
+    max_pages: int = Query(20, ge=1, le=200)
+):
+    """
+    Recent ranked match history for a player.
+    Returns opponent info, result, and elo change per match.
+    """
+    api_data = await fetch_player_from_api(username)
+    if not api_data:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    player_uuid = api_data.get("uuid")
+    if not player_uuid:
+        raise HTTPException(status_code=500, detail="UUID missing from API response")
+
+    recent_matches = []
+    before_cursor = None
+    if window == "current_season":
+        for _ in range(max_pages):
+            page_matches = await fetch_user_matches_from_api(
+                player_uuid,
+                count=100,
+                sort="newest",
+                match_type=2,
+                before=before_cursor
+            )
+            if not page_matches:
+                break
+            recent_matches.extend(page_matches)
+            if len(recent_matches) >= limit:
+                break
+            before_cursor = min(m["id"] for m in page_matches)
+    else:
+        window_days = 7 if window == "last_7_days" else 30
+        cutoff_dt = datetime.utcnow() - timedelta(days=window_days)
+        cutoff_epoch = int(cutoff_dt.timestamp())
+
+        for _ in range(max_pages):
+            page_matches = await fetch_user_matches_from_api(
+                player_uuid,
+                count=100,
+                sort="newest",
+                match_type=2,
+                before=before_cursor
+            )
+            if not page_matches:
+                break
+
+            scoped = [m for m in page_matches if (m.get("date") or 0) >= cutoff_epoch]
+            recent_matches.extend(scoped)
+
+            if len(recent_matches) >= limit:
+                break
+
+            oldest_in_page = min((m.get("date") or 0) for m in page_matches)
+            if oldest_in_page < cutoff_epoch:
+                break
+
+            before_cursor = min(m["id"] for m in page_matches)
+
+    recent_matches = recent_matches[:limit]
+
+    history_rows = []
+    for match in recent_matches:
+        players = match.get("players") or []
+        changes = match.get("changes") or []
+
+        # 1v1 opponent profile for the current match.
+        opponent = next(
+            (p for p in players if isinstance(p, dict) and p.get("uuid") and p.get("uuid") != player_uuid),
+            None
+        )
+        opponent_uuid = opponent.get("uuid") if isinstance(opponent, dict) else None
+        opponent_nickname = opponent.get("nickname") if isinstance(opponent, dict) else None
+
+        # Use change row for opponent/player elo snapshots when available.
+        player_change_row = next(
+            (c for c in changes if isinstance(c, dict) and c.get("uuid") == player_uuid),
+            None
+        )
+        opponent_change_row = next(
+            (c for c in changes if isinstance(c, dict) and c.get("uuid") == opponent_uuid),
+            None
+        )
+
+        winner_uuid = (match.get("result") or {}).get("uuid")
+        outcome = _match_outcome_for_player(winner_uuid, player_uuid)
+        elo_change = player_change_row.get("change") if isinstance(player_change_row, dict) else None
+
+        opponent_elo = None
+        if isinstance(opponent_change_row, dict):
+            opponent_elo = opponent_change_row.get("eloRate")
+        if opponent_elo is None and isinstance(opponent, dict):
+            opponent_elo = opponent.get("eloRate")
+
+        history_rows.append({
+            "match_id": match.get("id"),
+            "played_at_epoch": match.get("date"),
+            "outcome": outcome,  # win | loss | draw
+            "elo_change": elo_change,
+            "result_time_ms": (match.get("result") or {}).get("time"),
+            "opponent": {
+                "uuid": opponent_uuid,
+                "nickname": opponent_nickname,
+                "elo_rate": opponent_elo,
+                "head_url": (
+                    f"https://mc-heads.net/avatar/{opponent_nickname}/32"
+                    if opponent_nickname else None
+                )
+            }
+        })
+
+    return {
+        "username": api_data.get("nickname") or username,
+        "player_uuid": player_uuid,
+        "window": window,
+        "count": len(history_rows),
+        "matches": history_rows
+    }
 
 @router.post("/{username}/sync-matches")
 async def sync_matches(

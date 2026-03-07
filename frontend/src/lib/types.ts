@@ -101,3 +101,27 @@ export interface LeaderboardSearchResponse {
   query: string;
   results: LeaderboardPlayer[];
 }
+
+export interface MatchHistoryOpponent {
+  uuid: string | null;
+  nickname: string | null;
+  elo_rate: number | null;
+  head_url: string | null;
+}
+
+export interface MatchHistoryItem {
+  match_id: number | null;
+  played_at_epoch: number | null;
+  outcome: "win" | "loss" | "draw";
+  elo_change: number | null;
+  result_time_ms: number | null;
+  opponent: MatchHistoryOpponent;
+}
+
+export interface MatchHistoryResponse {
+  username: string;
+  player_uuid: string;
+  window: "current_season" | "last_7_days" | "last_30_days";
+  count: number;
+  matches: MatchHistoryItem[];
+}

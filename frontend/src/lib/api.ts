@@ -4,7 +4,8 @@ import type {
   SyncDashboardResponse,
   SyncResponse,
   SyncStatusResponse,
-  LeaderboardSearchResponse
+  LeaderboardSearchResponse,
+  MatchHistoryResponse
 } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
@@ -81,4 +82,17 @@ export function getSplitAverages(
   const query = params.toString();
   const path = `/players/${encodeURIComponent(username)}/split-averages${query ? `?${query}` : ""}`;
   return request<SplitAveragesResponse>(path);
+}
+
+export function getMatchHistory(
+  username: string,
+  options?: { window?: "current_season" | "last_7_days" | "last_30_days"; limit?: number; maxPages?: number }
+) {
+  const params = new URLSearchParams();
+  if (options?.window) params.set("window", options.window);
+  if (options?.limit != null) params.set("limit", String(options.limit));
+  if (options?.maxPages != null) params.set("max_pages", String(options.maxPages));
+  const query = params.toString();
+  const path = `/players/${encodeURIComponent(username)}/match-history${query ? `?${query}` : ""}`;
+  return request<MatchHistoryResponse>(path);
 }

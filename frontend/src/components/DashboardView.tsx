@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getSplitAverages, getStats, getSyncStatus, searchLeaderboardPlayers, syncDashboard } from "../lib/api";
-import type { LeaderboardPlayer, SplitAveragesResponse, StatsResponse, SyncDashboardResponse } from "../lib/types";
+import { getMatchHistory, getSplitAverages, getStats, getSyncStatus, searchLeaderboardPlayers, syncDashboard } from "../lib/api";
+import type {
+  LeaderboardPlayer,
+  MatchHistoryItem,
+  MatchHistoryResponse,
+  SplitAveragesResponse,
+  StatsResponse,
+  SyncDashboardResponse
+} from "../lib/types";
 import coalIcon from "../assets/coal.png";
 import ironIcon from "../assets/iron.png";
 import goldIcon from "../assets/gold.png";
@@ -84,6 +91,13 @@ function fmtSeconds(value: number | null | undefined) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+function fmtDateFromEpoch(epochSeconds: number | null | undefined) {
+  if (!epochSeconds) return "-";
+  const d = new Date(epochSeconds * 1000);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
+}
+
 function getPlayerHeadUrl(username: string, size = 32) {
   return `https://mc-heads.net/avatar/${encodeURIComponent(username)}/${size}`;
 }
@@ -129,8 +143,11 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
   const [splitStartFilter, setSplitStartFilter] = useState("all");
   const [splitBastionFilter, setSplitBastionFilter] = useState("all");
   const [activeUsername, setActiveUsername] = useState<string | null>(null);
+  const [matchHistory, setMatchHistory] = useState<MatchHistoryResponse | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [searchSuggestions, setSearchSuggestions] = useState<LeaderboardPlayer[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [selectedSuggestion, setSelectedSuggestion] = useState<string | null>(null);
   const syncMonitorIdRef = useRef(0);
   const suggestionDebounceRef = useRef<number | null>(null);
 
@@ -183,15 +200,17 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
       } else {
         setStatusText("Found new matches and synced latest data.");
       }
-      const [statsRes, splitsRes] = await Promise.all([
+      const [statsRes, splitsRes, historyRes] = await Promise.all([
         getStats(clean),
         getSplitAverages(clean, {
           start: defaultStartFilter,
           bastion: defaultBastionFilter
-        })
+        }),
+        getMatchHistory(clean, { window: "current_season", limit: 500, maxPages: 50 })
       ]);
       setStats(statsRes);
       setSplits(splitsRes);
+      setMatchHistory(historyRes);
       setActiveUsername(clean);
       setStatusText(sync.message);
       if (sync.sync_started) {
@@ -240,13 +259,15 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
       if (elapsed < minVisibleMs) {
         await new Promise((resolve) => setTimeout(resolve, minVisibleMs - elapsed));
       }
-      const [nextStats, nextSplits] = await Promise.all([
+      const [nextStats, nextSplits, nextHistory] = await Promise.all([
         getStats(usernameToTrack),
-        getSplitAverages(usernameToTrack, { start: startFilter, bastion: bastionFilter })
+        getSplitAverages(usernameToTrack, { start: startFilter, bastion: bastionFilter }),
+        getMatchHistory(usernameToTrack, { window: "current_season", limit: 500, maxPages: 50 })
       ]);
       if (monitorId !== syncMonitorIdRef.current) return;
       setStats(nextStats);
       setSplits(nextSplits);
+      setMatchHistory(nextHistory);
       setStatusText("Sync complete. Dashboard updated.");
     } catch {
       // Keep prior data if refresh fails.
@@ -285,10 +306,44 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
   }, [activeUsername, splitStartFilter, splitBastionFilter]);
 
   useEffect(() => {
+    if (!activeUsername) return;
+    const usernameToLoad = activeUsername;
+    let cancelled = false;
+
+    async function reloadHistory() {
+      setHistoryLoading(true);
+      try {
+        const next = await getMatchHistory(usernameToLoad, { window: "current_season", limit: 500, maxPages: 50 });
+        if (!cancelled) {
+          setMatchHistory(next);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Failed to load match history");
+        }
+      } finally {
+        if (!cancelled) {
+          setHistoryLoading(false);
+        }
+      }
+    }
+
+    reloadHistory();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeUsername]);
+
+  useEffect(() => {
     const q = username.trim();
     if (suggestionDebounceRef.current) {
       window.clearTimeout(suggestionDebounceRef.current);
       suggestionDebounceRef.current = null;
+    }
+
+    if (selectedSuggestion && q.toLowerCase() === selectedSuggestion.toLowerCase()) {
+      setShowSuggestions(false);
+      return;
     }
 
     if (q.length < 1) {
@@ -317,6 +372,7 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
 
   function handleSuggestionSelect(player: LeaderboardPlayer) {
     setUsername(player.nickname);
+    setSelectedSuggestion(player.nickname);
     setShowSuggestions(false);
     setSearchSuggestions([]);
   }
@@ -343,7 +399,10 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
           <div className="mt-6 space-y-3">
             <input
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(e) => {
+                setUsername(e.target.value);
+                setSelectedSuggestion(null);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
@@ -351,7 +410,10 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
                 }
               }}
               onFocus={() => {
-                if (searchSuggestions.length > 0) {
+                const q = username.trim();
+                const isSelectedValue =
+                  !!selectedSuggestion && q.toLowerCase() === selectedSuggestion.toLowerCase();
+                if (searchSuggestions.length > 0 && !isSelectedValue) {
                   setShowSuggestions(true);
                 }
               }}
@@ -521,115 +583,182 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
                 </div>
               </section>
 
-              <section className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-soft">
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-lg font-semibold">Average Split Times (Ranked)</h3>
-                    <p className="text-sm text-slate-400">{activeSplitWindow ? `${activeSplitWindow.total_split_rows} matches` : ""}</p>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <button
-                      onClick={() => setSplitWindowKey("all")}
-                      className={`rounded-lg px-3 py-2 text-sm font-semibold ${
-                        splitWindowKey === "all" ? "bg-cyan text-white" : "bg-slate-800 text-slate-300"
-                      }`}
-                    >
-                      All Time
-                    </button>
-                    <button
-                      onClick={() => setSplitWindowKey("7")}
-                      className={`rounded-lg px-3 py-2 text-sm font-semibold ${
-                        splitWindowKey === "7" ? "bg-cyan text-white" : "bg-slate-800 text-slate-300"
-                      }`}
-                    >
-                      7 Days
-                    </button>
-                    <button
-                      onClick={() => setSplitWindowKey("30")}
-                      className={`rounded-lg px-3 py-2 text-sm font-semibold ${
-                        splitWindowKey === "30" ? "bg-cyan text-white" : "bg-slate-800 text-slate-300"
-                      }`}
-                    >
-                      30 Days
-                    </button>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  {(activeSplitWindow?.total_split_rows ?? 0) === 0 ? (
-                    <div className="rounded-lg bg-slate-800/70 px-3 py-3 text-sm text-slate-300">
-                      No matches found for the selected seed type + bastion filters.
+              <section className="grid gap-4 xl:grid-cols-2">
+                <section className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-soft">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-lg font-semibold">Average Split Times (Ranked)</h3>
+                      <p className="text-sm text-slate-400">{activeSplitWindow ? `${activeSplitWindow.total_split_rows} matches` : ""}</p>
                     </div>
-                  ) : (
-                    splitRows.map((row) => (
-                      <div key={row.key} className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-lg bg-slate-800/70 px-3 py-2 text-sm">
-                        <span className="flex items-center gap-2 capitalize text-slate-300">
-                          {row.icon ? (
-                            <img
-                              src={row.icon}
-                              alt={row.label}
-                              className="h-5 w-5 rounded-sm object-contain"
-                              loading="lazy"
-                            />
-                          ) : null}
-                          {row.label}
-                        </span>
-                        <span className="font-semibold text-slate-100">{row.mmss}</span>
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        onClick={() => setSplitWindowKey("all")}
+                        className={`rounded-lg px-3 py-2 text-sm font-semibold ${
+                          splitWindowKey === "all" ? "bg-cyan text-white" : "bg-slate-800 text-slate-300"
+                        }`}
+                      >
+                        All Time
+                      </button>
+                      <button
+                        onClick={() => setSplitWindowKey("7")}
+                        className={`rounded-lg px-3 py-2 text-sm font-semibold ${
+                          splitWindowKey === "7" ? "bg-cyan text-white" : "bg-slate-800 text-slate-300"
+                        }`}
+                      >
+                        7 Days
+                      </button>
+                      <button
+                        onClick={() => setSplitWindowKey("30")}
+                        className={`rounded-lg px-3 py-2 text-sm font-semibold ${
+                          splitWindowKey === "30" ? "bg-cyan text-white" : "bg-slate-800 text-slate-300"
+                        }`}
+                      >
+                        30 Days
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    {(activeSplitWindow?.total_split_rows ?? 0) === 0 ? (
+                      <div className="rounded-lg bg-slate-800/70 px-3 py-3 text-sm text-slate-300">
+                        No matches found for the selected seed type + bastion filters.
                       </div>
-                    ))
+                    ) : (
+                      splitRows.map((row) => (
+                        <div key={row.key} className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-lg bg-slate-800/60 px-3 py-1.5 text-sm">
+                          <span className="flex items-center gap-2 capitalize text-slate-300">
+                            {row.icon ? (
+                              <img
+                                src={row.icon}
+                                alt={row.label}
+                                className="h-4 w-4 rounded-sm object-contain"
+                                loading="lazy"
+                              />
+                            ) : null}
+                            {row.label}
+                          </span>
+                          <span className="font-semibold text-slate-100">{row.mmss}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="mt-4 space-y-3 border-t border-slate-800 pt-3">
+                    <div>
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Filter by Seed Type</p>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => setSplitStartFilter("all")}
+                          className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                            splitStartFilter === "all" ? "bg-cyan text-white" : "bg-slate-800 text-slate-300"
+                          }`}
+                        >
+                          All
+                        </button>
+                        {startFilterOptions
+                          .filter((value) => value !== "all")
+                          .map((value) => (
+                          <button
+                            key={value}
+                            onClick={() => setSplitStartFilter(value)}
+                            className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                              splitStartFilter === value ? "bg-cyan text-white" : "bg-slate-800 text-slate-300"
+                            }`}
+                          >
+                            {fmtFilterLabel(value)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Filter by Bastion</p>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => setSplitBastionFilter("all")}
+                          className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                            splitBastionFilter === "all" ? "bg-cyan text-white" : "bg-slate-800 text-slate-300"
+                          }`}
+                        >
+                          All
+                        </button>
+                        {(splits?.available_filters.bastions ?? []).map((value) => (
+                          <button
+                            key={value}
+                            onClick={() => setSplitBastionFilter(value)}
+                            className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                              splitBastionFilter === value ? "bg-cyan text-white" : "bg-slate-800 text-slate-300"
+                            }`}
+                          >
+                            {fmtFilterLabel(value)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-soft">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <h3 className="text-lg font-semibold">Match History</h3>
+                    <p className="text-sm text-slate-400">
+                      {historyLoading ? "Loading..." : `${matchHistory?.count ?? 0} matches (season)`}
+                    </p>
+                  </div>
+
+                  {historyLoading ? (
+                    <p className="text-sm text-slate-400">Loading match history...</p>
+                  ) : (matchHistory?.matches.length ?? 0) === 0 ? (
+                    <p className="text-sm text-slate-400">No ranked matches found.</p>
+                  ) : (
+                    <div className="max-h-[540px] overflow-y-auto rounded-lg border border-slate-800">
+                      <div className="grid grid-cols-[1.2fr_0.6fr_0.6fr_0.8fr] gap-2 border-b border-slate-800 bg-slate-900 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        <span>Opponent</span>
+                        <span>Result</span>
+                        <span>Elo</span>
+                        <span>Date</span>
+                      </div>
+                      {(matchHistory?.matches ?? []).map((match: MatchHistoryItem) => (
+                        <div
+                          key={`${match.match_id ?? "m"}-${match.played_at_epoch ?? "t"}`}
+                          className="grid grid-cols-[1.2fr_0.6fr_0.6fr_0.8fr] gap-2 border-b border-slate-800/70 px-3 py-2 text-sm text-slate-200 last:border-b-0"
+                        >
+                          <div className="flex min-w-0 items-center gap-2">
+                            {match.opponent.head_url ? (
+                              <img
+                                src={match.opponent.head_url}
+                                alt={match.opponent.nickname ?? "opponent"}
+                                className="h-5 w-5 rounded-sm [image-rendering:pixelated]"
+                                loading="lazy"
+                              />
+                            ) : null}
+                            <span className="truncate">{match.opponent.nickname ?? "Unknown"}</span>
+                          </div>
+                          <span
+                            className={
+                              match.outcome === "win"
+                                ? "font-semibold text-green-400"
+                                : match.outcome === "loss"
+                                  ? "font-semibold text-red-400"
+                                  : "font-semibold text-blue-400"
+                            }
+                          >
+                            {match.outcome === "win" ? "W" : match.outcome === "loss" ? "L" : "D"}
+                          </span>
+                          <span
+                            className={
+                              (match.elo_change ?? 0) > 0
+                                ? "font-semibold text-green-400"
+                                : (match.elo_change ?? 0) < 0
+                                  ? "font-semibold text-red-400"
+                                  : "text-slate-300"
+                            }
+                          >
+                            {match.elo_change == null ? "-" : `${match.elo_change > 0 ? "+" : ""}${match.elo_change}`}
+                          </span>
+                          <span className="text-slate-400">{fmtDateFromEpoch(match.played_at_epoch)}</span>
+                        </div>
+                      ))}
+                    </div>
                   )}
-                </div>
-                <div className="mt-5 space-y-4 border-t border-slate-800 pt-4">
-                  <div>
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Filter by Seed Type</p>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => setSplitStartFilter("all")}
-                        className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
-                          splitStartFilter === "all" ? "bg-cyan text-white" : "bg-slate-800 text-slate-300"
-                        }`}
-                      >
-                        All
-                      </button>
-                      {startFilterOptions
-                        .filter((value) => value !== "all")
-                        .map((value) => (
-                        <button
-                          key={value}
-                          onClick={() => setSplitStartFilter(value)}
-                          className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
-                            splitStartFilter === value ? "bg-cyan text-white" : "bg-slate-800 text-slate-300"
-                          }`}
-                        >
-                          {fmtFilterLabel(value)}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Filter by Bastion</p>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => setSplitBastionFilter("all")}
-                        className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
-                          splitBastionFilter === "all" ? "bg-cyan text-white" : "bg-slate-800 text-slate-300"
-                        }`}
-                      >
-                        All
-                      </button>
-                      {(splits?.available_filters.bastions ?? []).map((value) => (
-                        <button
-                          key={value}
-                          onClick={() => setSplitBastionFilter(value)}
-                          className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
-                            splitBastionFilter === value ? "bg-cyan text-white" : "bg-slate-800 text-slate-300"
-                          }`}
-                        >
-                          {fmtFilterLabel(value)}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
+                </section>
               </section>
             </div>
           )}

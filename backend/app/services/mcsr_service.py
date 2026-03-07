@@ -48,13 +48,16 @@ async def fetch_user_matches_from_api(
     count: int = 100,
     sort: str = "newest",
     match_type: int | None = 2,
-    before: int | None = None
+    before: int | None = None,
+    season: int | None = None
 ):
     url = f"{BASE_URL}/users/{identifier}/matches?count={count}&sort={sort}"
     if match_type is not None:
         url += f"&type={match_type}"
     if before is not None:
         url += f"&before={before}"
+    if season is not None:
+        url += f"&season={season}"
 
     json_data = await _get_json_with_cache(url, ttl_seconds=45)
     if not json_data or json_data.get("status") != "success":
