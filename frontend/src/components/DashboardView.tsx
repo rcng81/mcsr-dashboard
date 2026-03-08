@@ -182,7 +182,7 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
   async function loadDashboard(usernameOverride?: string) {
     setLoading(true);
     setError(null);
-    setStatusText("Checking player and syncing ranked data...");
+    setStatusText(null);
     try {
       const clean = (usernameOverride ?? username).trim();
       syncMonitorIdRef.current += 1;
@@ -193,12 +193,10 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
       setSplitBastionFilter(defaultBastionFilter);
       const sync = await syncDashboard(clean);
       setSyncInfo(sync);
-      if (sync.first_time) {
-        setStatusText("First-time player detected. Building all-time history, this can take a bit.");
-      } else if (sync.up_to_date) {
-        setStatusText("Player is up to date. Loading dashboard.");
+      if (sync.up_to_date) {
+        setStatusText(null);
       } else {
-        setStatusText("Found new matches and synced latest data.");
+        setStatusText(sync.message);
       }
       const [statsRes, splitsRes, historyRes] = await Promise.all([
         getStats(clean),
@@ -212,7 +210,6 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
       setSplits(splitsRes);
       setMatchHistory(historyRes);
       setActiveUsername(clean);
-      setStatusText(sync.message);
       if (sync.sync_started) {
         setSyncProgress(0);
         void monitorSyncProgress(clean, defaultStartFilter, defaultBastionFilter, monitorId);
@@ -458,13 +455,13 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
             </button>
           </div>
 
-          {syncInfo ? (
+          {syncInfo && !syncInfo.up_to_date ? (
             <p className="mt-4 text-xs text-slate-400">
               {syncInfo.message}
               {syncInfo.sync ? ` Synced ${syncInfo.sync.fetched_ranked_matches_in_window} ranked matches (${syncInfo.sync.window}).` : ""}
             </p>
           ) : null}
-          {statusText ? <p className="mt-2 text-xs text-cyan">{statusText}</p> : null}
+          {statusText && !syncInfo?.up_to_date ? <p className="mt-2 text-xs text-cyan">{statusText}</p> : null}
           {syncProgress != null ? (
             <div className="mt-3">
               <div className="mb-1 flex items-center justify-between text-[11px] text-slate-400">
@@ -745,14 +742,16 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
                           </span>
                           <span
                             className={
-                              (match.elo_change ?? 0) > 0
+                              match.elo_change == null
+                                ? "font-semibold text-cyan"
+                                : (match.elo_change ?? 0) > 0
                                 ? "font-semibold text-green-400"
                                 : (match.elo_change ?? 0) < 0
                                   ? "font-semibold text-red-400"
                                   : "text-slate-300"
                             }
                           >
-                            {match.elo_change == null ? "-" : `${match.elo_change > 0 ? "+" : ""}${match.elo_change}`}
+                            {match.elo_change == null ? "Placement" : `${match.elo_change > 0 ? "+" : ""}${match.elo_change}`}
                           </span>
                           <span className="text-slate-400">{fmtDateFromEpoch(match.played_at_epoch)}</span>
                         </div>
