@@ -19,7 +19,7 @@ export default function LandingPage({ onStart }: LandingPageProps) {
       <div className="relative mx-auto max-w-6xl px-6 pb-12 pt-8 md:px-10">
         <header className="rounded-2xl border border-slate-700/70 bg-slate-900/50 px-5 py-3 backdrop-blur">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan">MCSR Ranked</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan">Minecraft Speedrunning Ranked (MCSR)</p>
             <p className="text-sm text-slate-300">Analytics Platform</p>
           </div>
         </header>
@@ -30,12 +30,12 @@ export default function LandingPage({ onStart }: LandingPageProps) {
               Live Competitive Insights
             </p>
             <h1 className="mt-4 text-4xl font-bold leading-tight md:text-5xl">
-              Track Ranked Performance
+              Track Minecraft Ranked Performance
               <span className="block text-slate-300">From Raw Matches to Clear Decisions.</span>
             </h1>
             <p className="mt-4 max-w-2xl text-sm text-slate-300 md:text-base">
-              Search any player to get all-time records, rolling form, split timing trends, elo progression, and seed
-              and bastion breakdowns powered by an automated sync pipeline.
+              Analyze Minecraft Speedrunning Ranked player data, including records, form, split timing trends, elo
+              progression, and seed/bastion breakdowns powered by an automated sync pipeline.
             </p>
             <div className="mt-6">
               <button
@@ -52,8 +52,8 @@ export default function LandingPage({ onStart }: LandingPageProps) {
               <p className="text-xs uppercase tracking-[0.12em] text-slate-400">What You Get</p>
               <ul className="mt-3 space-y-2 text-sm text-slate-200">
                 <li>All-time record, elo, streaks, and average match time</li>
-                <li>Ranked form across last 7 days and 30 days</li>
-                <li>Average split timings with filterable seed and bastion type</li>
+                <li>Minecraft ranked form across last 7 days and 30 days</li>
+                <li>Speedrun split timings with filterable seed and bastion type</li>
               </ul>
             </div>
             <div className="rounded-2xl border border-slate-700/70 bg-slate-900/45 p-5 backdrop-blur">

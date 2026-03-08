@@ -204,7 +204,7 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
           start: defaultStartFilter,
           bastion: defaultBastionFilter
         }),
-        getMatchHistory(clean, { window: "current_season", limit: 500, maxPages: 50 })
+        getMatchHistory(clean, { window: "current_season" })
       ]);
       setStats(statsRes);
       setSplits(splitsRes);
@@ -259,7 +259,7 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
       const [nextStats, nextSplits, nextHistory] = await Promise.all([
         getStats(usernameToTrack),
         getSplitAverages(usernameToTrack, { start: startFilter, bastion: bastionFilter }),
-        getMatchHistory(usernameToTrack, { window: "current_season", limit: 500, maxPages: 50 })
+        getMatchHistory(usernameToTrack, { window: "current_season" })
       ]);
       if (monitorId !== syncMonitorIdRef.current) return;
       setStats(nextStats);
@@ -310,7 +310,7 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
     async function reloadHistory() {
       setHistoryLoading(true);
       try {
-        const next = await getMatchHistory(usernameToLoad, { window: "current_season", limit: 500, maxPages: 50 });
+        const next = await getMatchHistory(usernameToLoad, { window: "current_season" });
         if (!cancelled) {
           setMatchHistory(next);
         }
@@ -381,8 +381,8 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[340px_1fr]">
+    <div className="h-screen overflow-hidden bg-slate-950 text-slate-100">
+      <div className="grid h-full grid-cols-1 lg:grid-cols-[340px_1fr]">
         <aside className="border-b border-slate-800 bg-slate-950/70 p-6 backdrop-blur lg:border-b-0 lg:border-r">
           <button
             onClick={onBackHome}
@@ -479,13 +479,13 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
           {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
         </aside>
 
-        <main className="p-4 md:p-8">
+        <main className="h-full overflow-hidden p-4 md:p-6">
           {!stats ? (
             <div className="flex h-full items-center justify-center rounded-3xl border border-dashed border-slate-700 bg-slate-900/60 p-10 text-center text-slate-400">
               Search for a player to load dashboard data.
             </div>
           ) : (
-            <div className="space-y-6">
+            <div className="grid h-full grid-rows-[auto_1fr] gap-4 overflow-hidden">
               <section className="grid gap-4 xl:grid-cols-2">
                 <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-soft">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -581,8 +581,8 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
                 </div>
               </section>
 
-              <section className="grid gap-4 xl:grid-cols-2">
-                <section className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-soft">
+              <section className="grid min-h-0 items-stretch gap-4 xl:grid-cols-2">
+                <section className="flex min-h-0 flex-col rounded-3xl border border-slate-800 bg-slate-900/80 p-5 shadow-soft">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <h3 className="text-lg font-semibold">Average Split Times (Ranked)</h3>
@@ -693,7 +693,7 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
                   </div>
                 </section>
 
-                <section className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-soft">
+                <section className="flex min-h-0 flex-col rounded-3xl border border-slate-800 bg-slate-900/80 p-5 shadow-soft">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                     <h3 className="text-lg font-semibold">Match History</h3>
                     <p className="text-sm text-slate-400">
@@ -706,7 +706,7 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
                   ) : (matchHistory?.matches.length ?? 0) === 0 ? (
                     <p className="text-sm text-slate-400">No ranked matches found.</p>
                   ) : (
-                    <div className="max-h-[540px] overflow-y-auto rounded-lg border border-slate-800">
+                    <div className="subtle-scrollbar min-h-0 flex-1 overflow-y-auto rounded-lg border border-slate-800">
                       <div className="grid grid-cols-[1.2fr_0.6fr_0.6fr_0.8fr] gap-2 border-b border-slate-800 bg-slate-900 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                         <span>Opponent</span>
                         <span>Result</span>

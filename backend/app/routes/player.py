@@ -222,9 +222,9 @@ async def search_leaderboard_players(
 @router.get("/{username}/match-history")
 async def get_match_history(
     username: str = Path(..., min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$"),
-    limit: int = Query(300, ge=1, le=2000),
+    limit: int | None = Query(None, ge=1, le=20000),
     window: str = Query("current_season", pattern="^(current_season|last_7_days|last_30_days)$"),
-    max_pages: int = Query(20, ge=1, le=200)
+    max_pages: int | None = Query(None, ge=1, le=5000)
 ):
     """
     Recent ranked match history for a player.
@@ -241,8 +241,10 @@ async def get_match_history(
 
     recent_matches = []
     before_cursor = None
+    effective_max_pages = max_pages or 5000
+
     if window == "current_season":
-        for _ in range(max_pages):
+        for _ in range(effective_max_pages):
             page_matches = await fetch_user_matches_from_api(
                 player_uuid,
                 count=100,
@@ -253,7 +255,7 @@ async def get_match_history(
             if not page_matches:
                 break
             recent_matches.extend(page_matches)
-            if len(recent_matches) >= limit:
+            if limit is not None and len(recent_matches) >= limit:
                 break
             before_cursor = min(m["id"] for m in page_matches)
     else:
@@ -261,7 +263,7 @@ async def get_match_history(
         cutoff_dt = datetime.utcnow() - timedelta(days=window_days)
         cutoff_epoch = int(cutoff_dt.timestamp())
 
-        for _ in range(max_pages):
+        for _ in range(effective_max_pages):
             page_matches = await fetch_user_matches_from_api(
                 player_uuid,
                 count=100,
@@ -275,7 +277,7 @@ async def get_match_history(
             scoped = [m for m in page_matches if (m.get("date") or 0) >= cutoff_epoch]
             recent_matches.extend(scoped)
 
-            if len(recent_matches) >= limit:
+            if limit is not None and len(recent_matches) >= limit:
                 break
 
             oldest_in_page = min((m.get("date") or 0) for m in page_matches)
@@ -284,7 +286,8 @@ async def get_match_history(
 
             before_cursor = min(m["id"] for m in page_matches)
 
-    recent_matches = recent_matches[:limit]
+    if limit is not None:
+        recent_matches = recent_matches[:limit]
 
     history_rows = []
     for match in recent_matches:
