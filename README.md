@@ -1,27 +1,21 @@
-📊 MCSR Dashboard – Competitive Match Analytics Platform
+# 📊 MCSR Dashboard – Competitive Match Analytics Platform
 
 A full-stack analytics dashboard that processes competitive match data and visualizes player performance trends.
 Built to explore modern data pipelines, API ingestion, caching strategies, and interactive frontend analytics.
 
+---
+
 ✨ Features
 
-Automated ingestion of competitive match data from external APIs
-
-Backend API built with FastAPI to serve structured match and player data
-
-PostgreSQL database for storing and querying historical match records
-
-Redis caching layer to reduce redundant API calls and improve response speed
-
-Incremental synchronization to fetch only new match data during updates
-
-Interactive dashboard showing all-time, 7-day, and 30-day performance trends
-
-Responsive UI designed for exploring match history and player statistics
-
-Containerized backend services using Docker for consistent deployment
-
-Full deployment pipeline with backend hosted on Render and frontend on Vercel
+- Automated ingestion of competitive match data from external APIs
+- Backend API built with FastAPI to serve structured match and player data
+- PostgreSQL database for storing and querying historical match records
+- Redis caching layer to reduce redundant API calls and improve response speed
+- Incremental synchronization to fetch only new match data during updates
+- Interactive dashboard showing all-time, 7-day, and 30-day performance trends
+- Responsive UI designed for exploring match history and player statistics
+- Containerized backend services using Docker for consistent deployment
+- Full deployment pipeline with backend hosted on Render and frontend on Vercel
 
 🛠 Tech Stack
 Languages
