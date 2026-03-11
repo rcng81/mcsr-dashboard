@@ -50,6 +50,7 @@ Built to explore modern data pipelines, API ingestion, caching strategies, and i
   <img src="https://img.shields.io/badge/Render-46E3B7?style=for-the-badge&logo=render&logoColor=black" />
   <img src="https://img.shields.io/badge/Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white" /> 
 </div>
+
 ### Dev Tools
 <div align="left"> 
   <img src="https://img.shields.io/badge/Git-F05032?style=for-the-badge&logo=git&logoColor=white" /> 
