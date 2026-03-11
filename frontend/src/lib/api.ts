@@ -5,7 +5,8 @@ import type {
   SyncResponse,
   SyncStatusResponse,
   LeaderboardSearchResponse,
-  MatchHistoryResponse
+  MatchHistoryResponse,
+  MatchHistoryDetailResponse
 } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
@@ -95,4 +96,10 @@ export function getMatchHistory(
   const query = params.toString();
   const path = `/players/${encodeURIComponent(username)}/match-history${query ? `?${query}` : ""}`;
   return request<MatchHistoryResponse>(path);
+}
+
+export function getMatchHistoryDetail(username: string, matchId: number) {
+  return request<MatchHistoryDetailResponse>(
+    `/players/${encodeURIComponent(username)}/match-history/${matchId}`
+  );
 }

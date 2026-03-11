@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getMatchHistory, getSplitAverages, getStats, getSyncStatus, searchLeaderboardPlayers, syncDashboard } from "../lib/api";
+import { getMatchHistory, getMatchHistoryDetail, getSplitAverages, getStats, getSyncStatus, searchLeaderboardPlayers, syncDashboard } from "../lib/api";
 import type {
   LeaderboardPlayer,
+  MatchHistoryDetailResponse,
   MatchHistoryItem,
   MatchHistoryResponse,
   SplitAveragesResponse,
@@ -98,6 +99,14 @@ function fmtDateFromEpoch(epochSeconds: number | null | undefined) {
   return d.toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
 }
 
+function fmtMatchAge(epochSeconds: number | null | undefined) {
+  if (!epochSeconds) return "-";
+  const diffHours = Math.max(Math.floor((Date.now() - epochSeconds * 1000) / 3600000), 0);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
 function getPlayerHeadUrl(username: string, size = 32) {
   return `https://mc-heads.net/avatar/${encodeURIComponent(username)}/${size}`;
 }
@@ -129,6 +138,30 @@ function getRankFromElo(elo: number | null | undefined): RankMeta {
   return { label: "Coal I", icon: coalIcon };
 }
 
+function DiscordIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-6 w-6 fill-current">
+      <path d="M20.32 4.37a16.4 16.4 0 0 0-4.1-1.29.06.06 0 0 0-.07.03c-.18.32-.38.74-.52 1.07a15.3 15.3 0 0 0-4.58 0 10.7 10.7 0 0 0-.53-1.07.06.06 0 0 0-.07-.03 16.4 16.4 0 0 0-4.1 1.29.05.05 0 0 0-.03.02C3.73 8.1 2.96 11.72 3.33 15.29a.07.07 0 0 0 .03.05 16.6 16.6 0 0 0 5.03 2.57.06.06 0 0 0 .08-.02c.39-.53.73-1.08 1.03-1.67a.06.06 0 0 0-.03-.08c-.55-.21-1.08-.46-1.58-.75a.06.06 0 0 1-.01-.1c.1-.08.21-.16.31-.24a.06.06 0 0 1 .06-.01c3.3 1.5 6.87 1.5 10.13 0a.06.06 0 0 1 .06 0c.1.08.21.16.31.24a.06.06 0 0 1-.01.1c-.5.29-1.03.54-1.58.75a.06.06 0 0 0-.03.08c.3.58.64 1.14 1.03 1.67a.06.06 0 0 0 .08.02 16.54 16.54 0 0 0 5.03-2.57.06.06 0 0 0 .03-.05c.44-4.13-.74-7.72-2.96-10.9a.05.05 0 0 0-.03-.02ZM9.55 13.1c-.99 0-1.8-.91-1.8-2.03 0-1.12.8-2.03 1.8-2.03 1 0 1.81.92 1.8 2.03 0 1.12-.8 2.03-1.8 2.03Zm4.9 0c-.99 0-1.8-.91-1.8-2.03 0-1.12.8-2.03 1.8-2.03 1 0 1.81.92 1.8 2.03 0 1.12-.8 2.03-1.8 2.03Z" />
+    </svg>
+  );
+}
+
+function TwitchIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-6 w-6 fill-current">
+      <path d="M4 3h17v11l-4 4h-3l-2 2H9v-2H4V3Zm2 2v9h4v2l2-2h4l3-3V5H6Zm5 2h2v5h-2V7Zm4 0h2v5h-2V7Z" />
+    </svg>
+  );
+}
+
+function YoutubeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-6 w-6 fill-current">
+      <path d="M21.58 7.19a2.88 2.88 0 0 0-2.03-2.03C17.78 4.67 12 4.67 12 4.67s-5.78 0-7.55.49A2.88 2.88 0 0 0 2.42 7.2C1.93 8.96 1.93 12 1.93 12s0 3.04.49 4.8a2.88 2.88 0 0 0 2.03 2.03c1.77.49 7.55.49 7.55.49s5.78 0 7.55-.49a2.88 2.88 0 0 0 2.03-2.03c.49-1.76.49-4.8.49-4.8s0-3.04-.49-4.8ZM9.99 15.01V8.99L15.2 12l-5.21 3.01Z" />
+    </svg>
+  );
+}
+
 export default function DashboardView({ onBackHome }: DashboardViewProps) {
   const [username, setUsername] = useState("");
   const [stats, setStats] = useState<StatsResponse | null>(null);
@@ -148,6 +181,11 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
   const [searchSuggestions, setSearchSuggestions] = useState<LeaderboardPlayer[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedSuggestion, setSelectedSuggestion] = useState<string | null>(null);
+  const [copiedDiscord, setCopiedDiscord] = useState(false);
+  const [expandedMatchIds, setExpandedMatchIds] = useState<number[]>([]);
+  const [matchDetails, setMatchDetails] = useState<Record<number, MatchHistoryDetailResponse>>({});
+  const [matchDetailLoadingIds, setMatchDetailLoadingIds] = useState<Record<number, boolean>>({});
+  const [matchDetailErrors, setMatchDetailErrors] = useState<Record<number, string>>({});
   const syncMonitorIdRef = useRef(0);
   const suggestionDebounceRef = useRef<number | null>(null);
 
@@ -380,6 +418,50 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
     void loadDashboard();
   }
 
+  async function handleCopyDiscord() {
+    const discordValue = stats?.socials?.discord_username || stats?.socials?.discord_id;
+    if (!discordValue) return;
+    try {
+      await navigator.clipboard.writeText(discordValue);
+      setCopiedDiscord(true);
+      window.setTimeout(() => setCopiedDiscord(false), 1600);
+    } catch {
+      setCopiedDiscord(false);
+    }
+  }
+
+  async function handleOpenMatchDetail(match: MatchHistoryItem) {
+    if (!activeUsername || !match.match_id) return;
+    const matchId = match.match_id;
+    if (expandedMatchIds.includes(matchId)) {
+      setExpandedMatchIds((prev) => prev.filter((id) => id !== matchId));
+      return;
+    }
+
+    setExpandedMatchIds((prev) => [...prev, matchId]);
+    if (matchDetails[matchId]) {
+      return;
+    }
+
+    setMatchDetailLoadingIds((prev) => ({ ...prev, [matchId]: true }));
+    setMatchDetailErrors((prev) => {
+      const next = { ...prev };
+      delete next[matchId];
+      return next;
+    });
+    try {
+      const detail = await getMatchHistoryDetail(activeUsername, matchId);
+      setMatchDetails((prev) => ({ ...prev, [matchId]: detail }));
+    } catch (e) {
+      setMatchDetailErrors((prev) => ({
+        ...prev,
+        [matchId]: e instanceof Error ? e.message : "Failed to load match details"
+      }));
+    } finally {
+      setMatchDetailLoadingIds((prev) => ({ ...prev, [matchId]: false }));
+    }
+  }
+
   return (
     <div className="h-screen overflow-hidden bg-slate-950 text-slate-100">
       <div className="grid h-full grid-cols-1 lg:grid-cols-[340px_1fr]">
@@ -485,13 +567,13 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
               Search for a player to load dashboard data.
             </div>
           ) : (
-            <div className="grid h-full grid-rows-[auto_1fr] gap-4 overflow-hidden">
+            <div className="relative grid h-full grid-rows-[auto_1fr] gap-4 overflow-hidden">
               <section className="grid gap-4 xl:grid-cols-2">
                 <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-soft">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="text-sm text-slate-400">Player</p>
-                      <h2 className="flex items-center gap-3 text-3xl font-bold">
+                      <div className="flex items-center gap-3">
                         <img
                           src={getPlayerHeadUrl(stats.username, 32)}
                           alt={`${stats.username} skin head`}
@@ -501,8 +583,47 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
                             e.currentTarget.src = getPlayerHeadUrl("Steve", 32);
                           }}
                         />
-                        <span>{stats.username}</span>
-                      </h2>
+                        <h2 className="text-3xl font-bold">{stats.username}</h2>
+                        <div className="flex items-center gap-2 pt-1 text-slate-400">
+                          {stats.socials?.discord_username || stats.socials?.discord_id ? (
+                            <button
+                              type="button"
+                              onClick={handleCopyDiscord}
+                              className="relative transition hover:text-cyan"
+                              title={copiedDiscord ? "Copied" : "Copy Discord"}
+                            >
+                              <DiscordIcon />
+                              {copiedDiscord ? (
+                                <span className="absolute -bottom-7 left-1/2 -translate-x-1/2 rounded-md border border-cyan/30 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-cyan">
+                                  Copied
+                                </span>
+                              ) : null}
+                            </button>
+                          ) : null}
+                          {stats.socials?.twitch_url ? (
+                            <a
+                              href={stats.socials.twitch_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="transition hover:text-cyan"
+                              title="Open Twitch"
+                            >
+                              <TwitchIcon />
+                            </a>
+                          ) : null}
+                          {stats.socials?.youtube_url ? (
+                            <a
+                              href={stats.socials.youtube_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="transition hover:text-cyan"
+                              title="Open YouTube"
+                            >
+                              <YoutubeIcon />
+                            </a>
+                          ) : null}
+                        </div>
+                      </div>
                       <p className="mt-1 text-sm italic text-slate-400">
                         {stats.overall_record?.record_line ?? "-"}
                       </p>
@@ -510,39 +631,46 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
                     <div className="rounded-xl bg-slate-800 px-4 py-2 text-sm text-slate-300">Personal Overview</div>
                   </div>
 
-                  <div className="mt-6 space-y-3 text-sm">
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-slate-400">Current Elo:</span>
-                        <img src={currentRank.icon} alt={currentRank.label} className="h-5 w-5" />
-                        <span className="font-semibold">{currentRank.label} ({stats.current_elo ?? "-"})</span>
+                  <div className="mt-6 p-1">
+                    <div className="grid gap-5 lg:grid-cols-[96px_1fr_auto] lg:items-center">
+                      <div className="flex items-center justify-center">
+                        <div className="p-2">
+                          <img src={currentRank.icon} alt={currentRank.label} className="h-16 w-16 object-contain" />
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-slate-400">Peak Elo:</span>
-                        <img src={peakRank.icon} alt={peakRank.label} className="h-5 w-5" />
-                        <span className="font-semibold">{peakRank.label} ({stats.peak_elo ?? "-"})</span>
-                      </div>
-                    </div>
-                    <div className="grid gap-3 md:grid-cols-2">
+
                       <div>
-                        <span className="text-slate-400">Current Streak:</span>{" "}
-                        <span className="font-semibold">{stats.win_streak?.current ?? 0}</span>
+                        <p className="text-2xl font-extrabold uppercase tracking-wide text-slate-100">{currentRank.label}</p>
+                        <p className="mt-1 text-2xl font-semibold text-slate-200">{stats.current_elo ?? "-"} ELO</p>
+                        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm">
+                          <span className="text-slate-400">
+                            Peak: <span className="font-semibold text-slate-200">{peakRank.label} ({stats.peak_elo ?? "-"})</span>
+                          </span>
+                          <span className="text-slate-400">
+                            Best Time: <span className="font-semibold text-slate-200">{stats.personal_best?.time_mmss ?? "-"}</span>
+                          </span>
+                        </div>
                       </div>
-                      <div>
-                        <span className="text-slate-400">Best Streak:</span>{" "}
-                        <span className="font-semibold">{stats.win_streak?.best ?? 0}</span>
-                      </div>
-                    </div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div>
-                        <span className="text-slate-400">Win Rate:</span>{" "}
-                        <span className="font-semibold">{(stats.overall_win_rate_percent ?? 0).toFixed(2)}%</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400">Average Time:</span>{" "}
-                        <span className="font-semibold">
-                          {stats.overall_average_time_mmss ?? fmtSeconds(stats.overall_average_time_seconds ?? null)}
-                        </span>
+
+                      <div className="grid min-w-[210px] gap-2 text-sm">
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="text-slate-400">Win Rate</span>
+                          <span className="font-semibold text-slate-100">{(stats.overall_win_rate_percent ?? 0).toFixed(2)}%</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="text-slate-400">Average Time</span>
+                          <span className="font-semibold text-slate-100">
+                            {stats.overall_average_time_mmss ?? fmtSeconds(stats.overall_average_time_seconds ?? null)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="text-slate-400">Current Streak</span>
+                          <span className="font-semibold text-slate-100">{stats.win_streak?.current ?? 0}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="text-slate-400">Best Streak</span>
+                          <span className="font-semibold text-slate-100">{stats.win_streak?.best ?? 0}</span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -713,49 +841,153 @@ export default function DashboardView({ onBackHome }: DashboardViewProps) {
                         <span>Elo</span>
                         <span>Date</span>
                       </div>
-                      {(matchHistory?.matches ?? []).map((match: MatchHistoryItem) => (
-                        <div
-                          key={`${match.match_id ?? "m"}-${match.played_at_epoch ?? "t"}`}
-                          className="grid grid-cols-[1.2fr_0.6fr_0.6fr_0.8fr] gap-2 border-b border-slate-800/70 px-3 py-2 text-sm text-slate-200 last:border-b-0"
-                        >
-                          <div className="flex min-w-0 items-center gap-2">
-                            {match.opponent.head_url ? (
-                              <img
-                                src={match.opponent.head_url}
-                                alt={match.opponent.nickname ?? "opponent"}
-                                className="h-5 w-5 rounded-sm [image-rendering:pixelated]"
-                                loading="lazy"
-                              />
+                      {(matchHistory?.matches ?? []).map((match: MatchHistoryItem) => {
+                        const matchId = match.match_id ?? -1;
+                        const isExpanded = match.match_id != null && expandedMatchIds.includes(match.match_id);
+                        const detail = match.match_id != null ? matchDetails[match.match_id] : undefined;
+                        const isLoadingDetail = match.match_id != null ? !!matchDetailLoadingIds[match.match_id] : false;
+                        const detailError = match.match_id != null ? matchDetailErrors[match.match_id] : undefined;
+
+                        return (
+                          <div key={`${match.match_id ?? "m"}-${match.played_at_epoch ?? "t"}`} className="border-b border-slate-800/70 last:border-b-0">
+                            <button
+                              type="button"
+                              onClick={() => void handleOpenMatchDetail(match)}
+                              className={`grid w-full grid-cols-[1.2fr_0.6fr_0.6fr_0.8fr] gap-2 px-3 py-2 text-left text-sm text-slate-200 transition hover:bg-slate-800/40 ${
+                                isExpanded ? "bg-slate-800/50" : ""
+                              }`}
+                            >
+                              <div className="flex min-w-0 items-center gap-2">
+                                {match.opponent.head_url ? (
+                                  <img
+                                    src={match.opponent.head_url}
+                                    alt={match.opponent.nickname ?? "opponent"}
+                                    className="h-5 w-5 rounded-sm [image-rendering:pixelated]"
+                                    loading="lazy"
+                                  />
+                                ) : null}
+                                <span className="truncate">{match.opponent.nickname ?? "Unknown"}</span>
+                              </div>
+                              <span
+                                className={
+                                  match.outcome === "win"
+                                    ? "font-semibold text-green-400"
+                                    : match.outcome === "loss"
+                                      ? "font-semibold text-red-400"
+                                      : "font-semibold text-blue-400"
+                                }
+                              >
+                                {match.outcome === "win" ? "W" : match.outcome === "loss" ? "L" : "D"}
+                              </span>
+                              <span
+                                className={
+                                  match.elo_change == null
+                                    ? "font-semibold text-cyan"
+                                    : (match.elo_change ?? 0) > 0
+                                    ? "font-semibold text-green-400"
+                                    : (match.elo_change ?? 0) < 0
+                                      ? "font-semibold text-red-400"
+                                      : "text-slate-300"
+                                }
+                              >
+                                {match.elo_change == null ? "Placement" : `${match.elo_change > 0 ? "+" : ""}${match.elo_change}`}
+                              </span>
+                              <span className="text-slate-400">{fmtDateFromEpoch(match.played_at_epoch)}</span>
+                            </button>
+
+                            {isExpanded ? (
+                              <div className="bg-slate-900/65 px-3 pb-3">
+                                <div className="rounded-xl border border-slate-800 bg-slate-950/55">
+                                  <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-800 px-4 py-3">
+                                    <div className="flex flex-wrap items-center gap-4 text-sm">
+                                      <div>
+                                        <p className="text-[11px] uppercase tracking-wide text-slate-500">Ranked</p>
+                                        <p className="text-slate-300">{detail ? fmtMatchAge(detail.played_at_epoch) : "Loading..."}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-[11px] uppercase tracking-wide text-slate-500">
+                                          {detail?.outcome === "win" ? "Victory" : detail?.outcome === "loss" ? "Defeat" : "Draw"}
+                                        </p>
+                                        <p className="text-xl font-bold text-slate-100">{detail?.result_time_text ?? "--:--.---"}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-[11px] uppercase tracking-wide text-slate-500">Opponent</p>
+                                        <p className="font-semibold text-slate-100">{detail?.opponent.nickname ?? match.opponent.nickname ?? "-"}</p>
+                                      </div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => setExpandedMatchIds((prev) => prev.filter((id) => id !== matchId))}
+                                      className="rounded-lg px-2 py-1 text-xs font-semibold text-slate-400 transition hover:bg-slate-800 hover:text-slate-100"
+                                    >
+                                      Close
+                                    </button>
+                                  </div>
+
+                                  <div className="px-4 py-3">
+                                    {isLoadingDetail ? (
+                                      <p className="text-sm text-slate-400">Loading match details...</p>
+                                    ) : detailError ? (
+                                      <p className="text-sm text-red-300">{detailError}</p>
+                                    ) : detail ? (
+                                      <>
+                                        <div className="mb-3 flex items-center justify-between text-xs text-slate-500">
+                                          <p>Season {detail.season ?? "-"}</p>
+                                          <p>Match #{detail.match_id ?? "-"}</p>
+                                        </div>
+                                        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 border-b border-slate-800 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                                          <div className="flex items-center gap-2 text-slate-200 normal-case tracking-normal">
+                                            {detail.opponent.head_url ? (
+                                              <img src={detail.opponent.head_url} alt={detail.opponent.nickname ?? "opponent"} className="h-7 w-7 rounded-sm [image-rendering:pixelated]" />
+                                            ) : null}
+                                            <span>{detail.opponent.nickname ?? "Opponent"}</span>
+                                          </div>
+                                          <span className="text-center">Split</span>
+                                          <div className="flex items-center justify-end gap-2 text-slate-200 normal-case tracking-normal">
+                                            <span>{detail.player.nickname ?? stats.username}</span>
+                                            {detail.player.head_url ? (
+                                              <img src={detail.player.head_url} alt={detail.player.nickname ?? "player"} className="h-7 w-7 rounded-sm [image-rendering:pixelated]" />
+                                            ) : null}
+                                          </div>
+                                        </div>
+
+                                        <div className="mt-1">
+                                          {detail.splits.map((row) => {
+                                            const opponentClass =
+                                              row.faster === "opponent" ? "text-green-400" : row.faster === "player" ? "text-red-400" : "text-slate-200";
+                                            const playerClass =
+                                              row.faster === "player" ? "text-green-400" : row.faster === "opponent" ? "text-red-400" : "text-slate-200";
+
+                                            return (
+                                              <div key={row.key} className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 border-b border-slate-800/60 py-2 text-sm last:border-b-0">
+                                                <div className="justify-self-start">
+                                                  <p className={`font-semibold ${opponentClass}`}>{row.opponent_time_text ?? "-"}</p>
+                                                  <p className={`${row.faster === "player" ? "text-red-400" : "text-slate-500"} text-xs`}>
+                                                    {row.delta_text && row.faster === "player" ? `(+${row.delta_text})` : row.delta_text && row.faster === "opponent" ? `(-${row.delta_text})` : ""}
+                                                  </p>
+                                                </div>
+                                                <div className="text-center">
+                                                  <p className="font-semibold text-slate-100">{row.label}</p>
+                                                </div>
+                                                <div className="justify-self-end text-right">
+                                                  <p className={`font-semibold ${playerClass}`}>{row.player_time_text ?? "-"}</p>
+                                                  <p className={`${row.faster === "opponent" ? "text-red-400" : "text-slate-500"} text-xs`}>
+                                                    {row.delta_text && row.faster === "opponent" ? `(+${row.delta_text})` : row.delta_text && row.faster === "player" ? `(-${row.delta_text})` : ""}
+                                                  </p>
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              </div>
                             ) : null}
-                            <span className="truncate">{match.opponent.nickname ?? "Unknown"}</span>
                           </div>
-                          <span
-                            className={
-                              match.outcome === "win"
-                                ? "font-semibold text-green-400"
-                                : match.outcome === "loss"
-                                  ? "font-semibold text-red-400"
-                                  : "font-semibold text-blue-400"
-                            }
-                          >
-                            {match.outcome === "win" ? "W" : match.outcome === "loss" ? "L" : "D"}
-                          </span>
-                          <span
-                            className={
-                              match.elo_change == null
-                                ? "font-semibold text-cyan"
-                                : (match.elo_change ?? 0) > 0
-                                ? "font-semibold text-green-400"
-                                : (match.elo_change ?? 0) < 0
-                                  ? "font-semibold text-red-400"
-                                  : "text-slate-300"
-                            }
-                          >
-                            {match.elo_change == null ? "Placement" : `${match.elo_change > 0 ? "+" : ""}${match.elo_change}`}
-                          </span>
-                          <span className="text-slate-400">{fmtDateFromEpoch(match.played_at_epoch)}</span>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </section>

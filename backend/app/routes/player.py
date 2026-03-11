@@ -51,6 +51,83 @@ def _normalize_seed_value(value: str | None) -> str | None:
     return normalized or None
 
 
+def _extract_socials(api_data: dict | None) -> dict[str, str | None]:
+    if not isinstance(api_data, dict):
+        return {
+            "twitch_url": None,
+            "youtube_url": None,
+            "discord_id": None,
+            "discord_username": None
+        }
+
+    connections = api_data.get("connections")
+    if not isinstance(connections, dict):
+        return {
+            "twitch_url": None,
+            "youtube_url": None,
+            "discord_id": None,
+            "discord_username": None
+        }
+
+    twitch = connections.get("twitch")
+    youtube = connections.get("youtube")
+    discord = connections.get("discord")
+
+    twitch_url = None
+    if isinstance(twitch, dict):
+        twitch_url = twitch.get("url")
+        if twitch_url is None:
+            username = twitch.get("username") or twitch.get("name") or twitch.get("login")
+            if username:
+                twitch_url = f"https://twitch.tv/{username}"
+
+    youtube_url = None
+    if isinstance(youtube, dict):
+        youtube_url = youtube.get("url")
+        channel_id = youtube.get("id")
+        handle = youtube.get("handle") or youtube.get("username")
+
+        # Prefer the canonical channel id when present. Display names are not stable identifiers.
+        if channel_id:
+            youtube_url = f"https://youtube.com/channel/{channel_id}"
+        elif youtube_url is None and handle:
+            safe_handle = str(handle)
+            youtube_url = safe_handle if safe_handle.startswith("http") else f"https://youtube.com/@{safe_handle.lstrip('@')}"
+
+    discord_id = None
+    discord_username = None
+    if isinstance(discord, dict):
+        discord_id = discord.get("id")
+        discord_username = (
+            discord.get("username")
+            or discord.get("tag")
+            or discord.get("name")
+            or discord.get("displayName")
+        )
+
+    return {
+        "twitch_url": str(twitch_url).strip() if twitch_url else None,
+        "youtube_url": str(youtube_url).strip() if youtube_url else None,
+        "discord_id": str(discord_id).strip() if discord_id else None,
+        "discord_username": str(discord_username).strip() if discord_username else None
+    }
+
+
+def _apply_player_api_fields(player: Player, api_data: dict) -> None:
+    socials = _extract_socials(api_data)
+    player.username = api_data.get("nickname") or player.username
+    player.current_elo = api_data.get("eloRate") if api_data.get("eloRate") is not None else player.current_elo
+    highest = api_data.get("seasonResult", {}).get("highest")
+    if highest is not None:
+        player.peak_elo = highest
+    elif player.peak_elo is None and player.current_elo is not None:
+        player.peak_elo = player.current_elo
+    player.twitch_url = socials["twitch_url"]
+    player.youtube_url = socials["youtube_url"]
+    player.discord_id = socials["discord_id"]
+    player.discord_username = socials["discord_username"]
+
+
 def _match_outcome_for_player(winner_uuid: str | None, player_uuid: str) -> str:
     if winner_uuid is None:
         return "draw"
@@ -63,6 +140,16 @@ def _normalize_uuid(value: str | None) -> str:
     if not value:
         return ""
     return value.replace("-", "").lower().strip()
+
+
+def _format_split_time(ms_value: int | float | None) -> str | None:
+    if ms_value is None:
+        return None
+    total_ms = int(round(ms_value))
+    minutes = total_ms // 60000
+    seconds = (total_ms % 60000) // 1000
+    milliseconds = total_ms % 1000
+    return f"{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
 
 
 async def _set_sync_progress(uuid: str, processed: int, total: int, message: str):
@@ -130,7 +217,21 @@ async def get_player(
     # 2️⃣ Now check DB using UUID
     player = db.query(Player).filter(Player.uuid == uuid).first()
 
-    if player:
+    if not player:
+        player = Player(
+            uuid=uuid,
+            username=api_data.get("nickname"),
+            current_elo=api_data.get("eloRate") or 0,
+            peak_elo=api_data.get("eloRate") or 0
+        )
+        _apply_player_api_fields(player, api_data)
+        db.add(player)
+        db.commit()
+        db.refresh(player)
+    else:
+        _apply_player_api_fields(player, api_data)
+        db.commit()
+        db.refresh(player)
         return player
 
     # 3️⃣ Create new player
@@ -140,6 +241,7 @@ async def get_player(
         current_elo=api_data.get("eloRate") or 0,
         peak_elo=api_data.get("eloRate") or 0
     )
+    _apply_player_api_fields(new_player, api_data)
 
     db.add(new_player)
     db.commit()
@@ -217,6 +319,39 @@ async def search_leaderboard_players(
         })
 
     return {"query": q, "results": matches}
+
+
+@router.get("/{username}/socials")
+async def get_player_socials(
+    username: str = Path(..., min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$"),
+    db: Session = Depends(get_db)
+):
+    api_data = await fetch_player_from_api(username)
+    if not api_data:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    uuid = api_data.get("uuid")
+    if not uuid:
+        raise HTTPException(status_code=500, detail="UUID missing from API response")
+
+    player = db.query(Player).filter(Player.uuid == uuid).first()
+    socials = _extract_socials(api_data)
+
+    if player:
+        _apply_player_api_fields(player, api_data)
+        db.commit()
+        db.refresh(player)
+
+    return {
+        "username": api_data.get("nickname") or username,
+        "player_uuid": uuid,
+        "socials": {
+            "twitch_url": socials["twitch_url"] if api_data else (player.twitch_url if player else None),
+            "youtube_url": socials["youtube_url"] if api_data else (player.youtube_url if player else None),
+            "discord_id": socials["discord_id"] if api_data else (player.discord_id if player else None),
+            "discord_username": socials["discord_username"] if api_data else (player.discord_username if player else None)
+        }
+    }
 
 
 @router.get("/{username}/match-history")
@@ -359,6 +494,112 @@ async def get_match_history(
         "matches": history_rows
     }
 
+
+@router.get("/{username}/match-history/{match_id}")
+async def get_match_history_detail(
+    username: str = Path(..., min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$"),
+    match_id: int = Path(..., ge=1)
+):
+    api_data = await fetch_player_from_api(username)
+    if not api_data:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    player_uuid = api_data.get("uuid")
+    if not player_uuid:
+        raise HTTPException(status_code=500, detail="UUID missing from API response")
+    player_uuid_norm = _normalize_uuid(player_uuid)
+
+    full_match_data = await fetch_match_info_from_api(match_id)
+    if not full_match_data or not isinstance(full_match_data.get("data"), dict):
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    match_payload = full_match_data["data"]
+    players = match_payload.get("players") or []
+    splits_by_uuid = extract_splits(full_match_data)
+
+    player_profile = next(
+        (p for p in players if isinstance(p, dict) and _normalize_uuid(p.get("uuid")) == player_uuid_norm),
+        None
+    )
+    opponent_profile = next(
+        (p for p in players if isinstance(p, dict) and _normalize_uuid(p.get("uuid")) != player_uuid_norm),
+        None
+    )
+
+    if player_profile is None:
+        raise HTTPException(status_code=404, detail="Player not found in match")
+
+    player_key = player_profile.get("uuid")
+    opponent_key = opponent_profile.get("uuid") if isinstance(opponent_profile, dict) else None
+    player_splits = splits_by_uuid.get(player_key, {})
+    opponent_splits = splits_by_uuid.get(opponent_key, {}) if opponent_key else {}
+
+    split_order = [
+        ("nether_enter", "Entered Nether"),
+        ("bastion", "Entered Bastion"),
+        ("fortress", "Entered Fortress"),
+        ("first_rod", "First Rod"),
+        ("blind", "Blind Travel"),
+        ("stronghold", "Found Stronghold"),
+        ("end_enter", "Entered The End"),
+        ("dragon_death", "Dragon Death"),
+        ("finish", "Finish")
+    ]
+
+    split_rows = []
+    for key, label in split_order:
+        player_time = player_splits.get(key)
+        opponent_time = opponent_splits.get(key)
+        delta_ms = None
+        faster = None
+        if player_time is not None and opponent_time is not None:
+            delta_ms = int(player_time - opponent_time)
+            if delta_ms < 0:
+                faster = "player"
+            elif delta_ms > 0:
+                faster = "opponent"
+            else:
+                faster = "tie"
+
+        split_rows.append({
+            "key": key,
+            "label": label,
+            "player_time_ms": player_time,
+            "player_time_text": _format_split_time(player_time),
+            "opponent_time_ms": opponent_time,
+            "opponent_time_text": _format_split_time(opponent_time),
+            "delta_ms": delta_ms,
+            "delta_text": _format_split_time(abs(delta_ms)) if delta_ms is not None else None,
+            "faster": faster
+        })
+
+    winner_uuid = (match_payload.get("result") or {}).get("uuid")
+    outcome = _match_outcome_for_player(winner_uuid, player_key)
+
+    return {
+        "match_id": match_payload.get("id"),
+        "season": match_payload.get("season"),
+        "played_at_epoch": match_payload.get("date"),
+        "outcome": outcome,
+        "result_time_ms": (match_payload.get("result") or {}).get("time"),
+        "result_time_text": _format_split_time((match_payload.get("result") or {}).get("time")),
+        "player": {
+            "uuid": player_key,
+            "nickname": player_profile.get("nickname"),
+            "head_url": f"https://mc-heads.net/avatar/{player_profile.get('nickname')}/32" if player_profile.get("nickname") else None
+        },
+        "opponent": {
+            "uuid": opponent_key,
+            "nickname": opponent_profile.get("nickname") if isinstance(opponent_profile, dict) else None,
+            "head_url": (
+                f"https://mc-heads.net/avatar/{opponent_profile.get('nickname')}/32"
+                if isinstance(opponent_profile, dict) and opponent_profile.get("nickname")
+                else None
+            )
+        },
+        "splits": split_rows
+    }
+
 @router.post("/{username}/sync-matches")
 async def sync_matches(
     username: str = Path(..., min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$"),
@@ -383,9 +624,12 @@ async def sync_matches(
             current_elo=api_data.get("eloRate") or 0,
             peak_elo=api_data.get("eloRate") or 0
         )
+        _apply_player_api_fields(player, api_data)
         db.add(player)
         db.commit()
         db.refresh(player)
+    else:
+        _apply_player_api_fields(player, api_data)
 
     # Fetch ranked matches by scope.
     cutoff_epoch = None
@@ -573,10 +817,15 @@ async def sync_dashboard(
             current_elo=api_data.get("eloRate") or 0,
             peak_elo=api_data.get("eloRate") or 0
         )
+        _apply_player_api_fields(player, api_data)
         db.add(player)
         db.commit()
         db.refresh(player)
         created_player = True
+    else:
+        _apply_player_api_fields(player, api_data)
+        db.commit()
+        db.refresh(player)
 
     latest_api_match_id = None
     latest_rows = await fetch_user_matches_from_api(uuid, count=1, sort="newest", match_type=2)
@@ -820,6 +1069,7 @@ async def get_player_stats(
     overall_win_rate_percent = None
     overall_average_time_seconds = None
     overall_average_time_mmss = None
+    socials = _extract_socials(api_data)
     if api_data and api_data.get("statistics", {}).get("total"):
         total_stats = api_data["statistics"]["total"]
         ranked_played = total_stats.get("playedMatches", {}).get("ranked") or 0
@@ -838,6 +1088,12 @@ async def get_player_stats(
             api_data.get("seasonResult", {}).get("highest")
             if api_data else player.peak_elo
         ),
+        "socials": {
+            "twitch_url": socials["twitch_url"] if api_data else player.twitch_url,
+            "youtube_url": socials["youtube_url"] if api_data else player.youtube_url,
+            "discord_id": socials["discord_id"] if api_data else player.discord_id,
+            "discord_username": socials["discord_username"] if api_data else player.discord_username
+        },
         "personal_best": {
             "time_ms": (
                 api_data.get("statistics", {})

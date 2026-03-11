@@ -15,6 +15,10 @@ class Player(Base):
 
     current_elo = Column(Integer)
     peak_elo = Column(Integer)
+    twitch_url = Column(String, nullable=True)
+    youtube_url = Column(String, nullable=True)
+    discord_id = Column(String, nullable=True)
+    discord_username = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

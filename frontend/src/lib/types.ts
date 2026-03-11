@@ -17,6 +17,12 @@ export interface StatsResponse {
   username: string;
   current_elo: number | null;
   peak_elo?: number | null;
+  socials?: {
+    twitch_url: string | null;
+    youtube_url: string | null;
+    discord_id: string | null;
+    discord_username: string | null;
+  };
   overall_win_rate_percent?: number | null;
   overall_average_time_seconds?: number | null;
   overall_average_time_mmss?: string | null;
@@ -124,4 +130,36 @@ export interface MatchHistoryResponse {
   window: "current_season" | "last_7_days" | "last_30_days";
   count: number;
   matches: MatchHistoryItem[];
+}
+
+export interface MatchSplitDetailRow {
+  key: string;
+  label: string;
+  player_time_ms: number | null;
+  player_time_text: string | null;
+  opponent_time_ms: number | null;
+  opponent_time_text: string | null;
+  delta_ms: number | null;
+  delta_text: string | null;
+  faster: "player" | "opponent" | "tie" | null;
+}
+
+export interface MatchHistoryDetailResponse {
+  match_id: number | null;
+  season: number | null;
+  played_at_epoch: number | null;
+  outcome: "win" | "loss" | "draw";
+  result_time_ms: number | null;
+  result_time_text: string | null;
+  player: {
+    uuid: string | null;
+    nickname: string | null;
+    head_url: string | null;
+  };
+  opponent: {
+    uuid: string | null;
+    nickname: string | null;
+    head_url: string | null;
+  };
+  splits: MatchSplitDetailRow[];
 }

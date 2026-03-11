@@ -1,6 +1,28 @@
 def extract_splits(match_data):
     splits = {}
 
+    def ensure_player(uuid):
+        if uuid not in splits:
+            splits[uuid] = {
+                "nether_enter": None,
+                "bastion": None,
+                "fortress": None,
+                "first_rod": None,
+                "blind": None,
+                "stronghold": None,
+                "end_enter": None,
+                "dragon_death": None,
+                "finish": None
+            }
+
+    def set_min_split(uuid, key, time_value):
+        if time_value is None:
+            return
+        ensure_player(uuid)
+        current = splits[uuid][key]
+        if current is None or time_value < current:
+            splits[uuid][key] = time_value
+
     data = match_data.get("data", {})
     timelines = data.get("timelines", [])
     completions = data.get("completions", [])
@@ -10,21 +32,10 @@ def extract_splits(match_data):
         completion_time = completion.get("time")
         if not uuid:
             continue
-        if uuid not in splits:
-            splits[uuid] = {
-                "nether_enter": None,
-                "bastion": None,
-                "fortress": None,
-                "first_rod": None,
-                "blind": None,
-                "stronghold": None,
-                "end_enter": None,
-                "dragon_death": None,
-                "finish": None
-            }
+        ensure_player(uuid)
         if completion_time is not None and splits[uuid]["finish"] is None:
             # Fallback: completion time is final split even if timeline.complete is missing.
-            splits[uuid]["finish"] = completion_time
+            set_min_split(uuid, "finish", completion_time)
 
     for event in timelines:
         uuid = event.get("uuid")
@@ -33,45 +44,34 @@ def extract_splits(match_data):
         if not uuid or not event_type:
             continue
 
-        if uuid not in splits:
-            splits[uuid] = {
-                "nether_enter": None,
-                "bastion": None,
-                "fortress": None,
-                "first_rod": None,
-                "blind": None,
-                "stronghold": None,
-                "end_enter": None,
-                "dragon_death": None,
-                "finish": None
-            }
+        ensure_player(uuid)
 
-        if event_type == "story.enter_the_nether" and splits[uuid]["nether_enter"] is None:
-            splits[uuid]["nether_enter"] = time
+        if event_type == "story.enter_the_nether":
+            set_min_split(uuid, "nether_enter", time)
 
-        elif event_type == "nether.find_bastion" and splits[uuid]["bastion"] is None:
-            splits[uuid]["bastion"] = time
+        elif event_type == "nether.find_bastion":
+            set_min_split(uuid, "bastion", time)
 
-        elif event_type == "nether.find_fortress" and splits[uuid]["fortress"] is None:
-            splits[uuid]["fortress"] = time
+        elif event_type == "nether.find_fortress":
+            set_min_split(uuid, "fortress", time)
 
-        elif event_type == "nether.obtain_blaze_rod" and splits[uuid]["first_rod"] is None:
-            splits[uuid]["first_rod"] = time
+        elif event_type == "nether.obtain_blaze_rod":
+            set_min_split(uuid, "first_rod", time)
 
-        elif event_type == "projectelo.timeline.blind_travel" and splits[uuid]["blind"] is None:
-            splits[uuid]["blind"] = time
+        elif event_type == "projectelo.timeline.blind_travel":
+            set_min_split(uuid, "blind", time)
 
-        elif event_type == "story.follow_ender_eye" and splits[uuid]["stronghold"] is None:
-            splits[uuid]["stronghold"] = time
+        elif event_type == "story.follow_ender_eye":
+            set_min_split(uuid, "stronghold", time)
 
-        elif event_type == "story.enter_the_end" and splits[uuid]["end_enter"] is None:
-            splits[uuid]["end_enter"] = time
+        elif event_type == "story.enter_the_end":
+            set_min_split(uuid, "end_enter", time)
 
-        elif event_type == "projectelo.timeline.dragon_death" and splits[uuid]["dragon_death"] is None:
-            splits[uuid]["dragon_death"] = time
+        elif event_type == "projectelo.timeline.dragon_death":
+            set_min_split(uuid, "dragon_death", time)
 
-        elif event_type == "projectelo.timeline.complete" and splits[uuid]["finish"] is None:
-            splits[uuid]["finish"] = time
+        elif event_type == "projectelo.timeline.complete":
+            set_min_split(uuid, "finish", time)
 
     return splits
 
