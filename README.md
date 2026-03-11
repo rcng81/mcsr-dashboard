@@ -1,5 +1,7 @@
 # 📊 MCSR Dashboard – Competitive Match Analytics Platform
 
+[![Live Demo](https://img.shields.io/badge/Live-Demo-green?style=for-the-badge)]([https://your-website-link.com](https://mcsr-stats.vercel.app/))
+
 A full-stack analytics dashboard that processes competitive match data and visualizes player performance trends.
 Built to explore modern data pipelines, API ingestion, caching strategies, and interactive frontend analytics.
 
